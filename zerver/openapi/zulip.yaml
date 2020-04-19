@@ -26,6 +26,26 @@ security:
 # Endpoint definitions
 #######################
 paths:
+  /jwt_fetch_api_key:
+    post:
+      description: |
+      operationId: zerver.views.auth.api_jwt_fetch_api_key
+      parameters:
+        - name: json_web_token
+          in: query
+          description: |
+            The username to be used for authentication (typically, the email
+            address, but it could be an LDAP username).
+          schema:
+            type: string
+          required: true
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyResponse'
   /fetch_api_key:
     post:
       description: |
