@@ -181,7 +181,7 @@ components:
     MessageEvent:
       properties:
         id:
-          type: in
+          type: int
         message:
           $ref: '#/components/Message'
         type:
