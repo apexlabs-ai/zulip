@@ -471,7 +471,7 @@ paths:
                     messages:
                       type: array
                       items:
-                        type: object
+                        $ref: '#/components/Message'
                 - example:
                     {
                         "anchor": 21,
@@ -2984,7 +2984,7 @@ paths:
                     streams:
                       type: array
                       items:
-                        type: object
+                        $ref: "#/components/schemas/Stream"
                       description: |
                         A list of `stream` objects, which contain a `description`, a `name`,
                         their `stream_id` and whether they are `invite_only` or not.
@@ -3710,8 +3710,43 @@ components:
               "msg": "User not authorized for this query",
               "result": "error"
           }
+    #### Minimal definitions for basic openapi generated client
+    Message:
+      type: object
+      properties:
+        type:
+          type: string
+        content:
+          type: string
+        id:
+          type: int
+        content-type:
+          type: string
+        is_me_message:
+          type: boolean
+        sender_email:
+          type: string
+        sender_id:
+          type: int
+        sender_full_name:
+          type: string
+        sender_short_name:
+          type: string
+        timestamp:
+          type: int
+    Stream:
+      type: object
+      properties:
+        description:
+          type: string
+        invite_only:
+          type: boolean
+        name:
+          type: string
+        stream_id:
+          type: int
 
-  ###################
+#  ###################
   # Shared responses
   ###################
   responses:

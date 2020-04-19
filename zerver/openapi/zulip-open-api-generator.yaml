@@ -156,6 +156,29 @@ components:
       - example:
           msg: ''
           result: success
+    Message:
+      properties:
+        content:
+          type: string
+        content-type:
+          type: string
+        id:
+          type: int
+        is_me_message:
+          type: boolean
+        sender_email:
+          type: string
+        sender_full_name:
+          type: string
+        sender_id:
+          type: int
+        sender_short_name:
+          type: string
+        timestamp:
+          type: int
+        type:
+          type: string
+      type: object
     MissingArgumentError:
       allOf:
       - $ref: '#/components/schemas/CodedError'
@@ -184,6 +207,17 @@ components:
           msg: Stream 'nonexistent_stream' does not exist
           result: error
           stream: nonexistent_stream
+    Stream:
+      properties:
+        description:
+          type: string
+        invite_only:
+          type: boolean
+        name:
+          type: string
+        stream_id:
+          type: int
+      type: object
     UserNotAuthorizedError:
       allOf:
       - $ref: '#/components/schemas/CodedError'
@@ -349,7 +383,7 @@ components:
             type: boolean
           messages:
             items:
-              type: object
+              $ref: '#/components/Message'
             type: array
       - example:
           anchor: 21
@@ -854,7 +888,7 @@ components:
 
               '
             items:
-              type: object
+              $ref: '#/components/schemas/Stream'
             type: array
       - example:
           msg: ''
