@@ -1431,10 +1431,7 @@ paths:
         in: query
         name: narrow
         schema:
-          default: []
-          items:
-            type: object
-          type: array
+          type: string
       - description: 'Whether the client supports computing gravatars URLs.  If
 
           enabled, `avatar_url` will be included in the response only

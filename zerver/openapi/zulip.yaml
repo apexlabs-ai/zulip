@@ -405,10 +405,7 @@ paths:
           The narrow where you want to fetch the messages from. See how to
           [construct a narrow](/api/construct-narrow).
         schema:
-          type: array
-          items:
-            type: object
-          default: []
+          type: string
         example: [{"operand": "Denmark", "operator": "stream"}]
       - name: client_gravatar
         in: query
