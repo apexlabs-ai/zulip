@@ -62,9 +62,6 @@ components:
     ApiKeyResponse:
       allOf:
       - $ref: '#/components/schemas/JsonSuccess'
-      - required:
-        - api_key
-        - email
       - properties:
           api_key:
             description: 'The API key that can be used to authenticate as the requested
@@ -1289,6 +1286,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/getStreamIdGetError'
           description: Bad request.
+  /jwt_fetch_api_key:
+    post:
+      description: ''
+      operationId: zerver.views.auth.api_jwt_fetch_api_key
+      parameters:
+      - description: 'The username to be used for authentication (typically, the email
+
+          address, but it could be an LDAP username).
+
+          '
+        in: query
+        name: json_web_token
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyResponse'
+          description: Success.
   /mark_all_as_read:
     post:
       description: 'Mark all the user''s unread messages as read. This is often called
