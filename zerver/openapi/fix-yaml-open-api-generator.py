@@ -4,22 +4,33 @@ import yaml
 import stringcase
 
 
+BROKEN_PATHS = [
+    '/events',
+    '/messages/{message_id}/history',
+    '/realm/filters',
+    '/server_settings',
+    '/user_groups',
+    '/users',
+    '/users/me/{stream_id}/topics',
+    '/users/me/subscriptions/properties'
+]
+
+
 with open('zulip.yaml') as stream:
     schema = yaml.safe_load(stream)
 
 
-linenr=0
-# print(schema['paths'])
+# Remove broken paths from schema
+for path in BROKEN_PATHS:
+    del(schema['paths'][path])
+
 for path in schema['paths'].keys():
-    linenr += 1
+    print(path)
     for method in schema['paths'][path].keys():
         for status in schema['paths'][path][method]['responses'].keys():
             if schema['paths'][path][method]['responses'][status].get('content', None):
                 allOf = schema['paths'][path][method]['responses'][status]['content']['application/json']['schema'].get('allOf', None)
                 if allOf:
-                    print(path)
-                    print(method)
-                    print(status)
                     if status == '200':
                         suffix = 'response'
                     elif status == '400':

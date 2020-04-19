@@ -225,70 +225,6 @@ components:
           code: BAD_REQUEST
           msg: User not authorized for this query
           result: error
-    eventsGetResponse:
-      allOf:
-      - $ref: '#/components/schemas/JsonSuccess'
-      - properties:
-          events:
-            description: 'An array of `event` objects (possibly zero-length if `dont_block`
-              is
-
-              set) of events with IDs newer than `last_event_id`. Event IDs are
-
-              guaranteed to be increasing, but they are not guaranteed to be
-
-              consecutive.
-
-              '
-            items:
-              type: object
-            type: array
-      - example:
-          events:
-          - id: 0
-            message:
-              avatar_url: https://url/for/othello-bots/avatar
-              client: website
-              content: I come not, friends, to steal away your hearts.
-              content_type: text/x-markdown
-              display_recipient: Denmark
-              id: 12345678
-              recipient_id: 12314
-              sender_email: othello-bot@example.com
-              sender_full_name: Othello Bot
-              sender_id: 13215
-              sender_realm_str: example
-              sender_short_name: othello-bot
-              timestamp: 1375978403
-              topic: Castle
-              topic_links: []
-              type: stream
-            type: message
-          - id: 1
-            message:
-              avatar_url: https://url/for/othello-bots/avatar
-              client: website
-              content: With mirth and laughter let old wrinkles come.
-              content_type: text/x-markdown
-              display_recipient:
-              - email: hamlet@example.com
-                full_name: Hamlet of Denmark
-                id: 31572
-                short_name: hamlet
-              id: 12345679
-              recipient_id: 18391
-              sender_email: othello-bot@example.com
-              sender_full_name: Othello Bot
-              sender_id: 13215
-              sender_realm_str: example
-              sender_short_name: othello-bot
-              subject: ''
-              timestamp: 1375978404
-              topic_links: []
-              type: private
-            type: message
-          msg: ''
-          result: success
     getStreamIdGetError:
       allOf:
       - $ref: '#/components/schemas/CodedError'
@@ -465,40 +401,6 @@ components:
           msg: ''
           raw_content: '**Don''t** forget your towel!'
           result: success
-    messagesMessageIdHistoryGetResponse:
-      allOf:
-      - $ref: '#/components/schemas/JsonSuccess'
-      - properties:
-          message_history:
-            description: 'A chronologically sorted array of `snapshot`
-
-              objects, each one with the values of the
-
-              message after the edition.
-
-              '
-            items:
-              type: object
-            type: array
-      - example:
-          message_history:
-          - content: Hello!
-            rendered_content: <p>Hello!</p>
-            timestamp: 1530129122
-            topic: party at my houz
-            user_id: 5
-          - content: Howdy!
-            content_html_diff: <div><p><span class="highlight_text_inserted">Howdy!</span></p>
-              <p><span class="highlight_text_deleted">Hello!</span></p></div>
-            prev_content: Hello!
-            prev_rendered_content: <p>Hello!</p>
-            prev_topic: party at my houz
-            rendered_content: <p>Howdy!</p>
-            timestamp: 1530129134
-            topic: party at my house
-            user_id: 5
-          msg: ''
-          result: success
     messagesMessageIdPatchError:
       allOf:
       - $ref: '#/components/schemas/CodedError'
@@ -582,53 +484,6 @@ components:
               source_url: /user_avatars/1/emoji/images/1.png
           msg: ''
           result: success
-    realmFiltersGetResponse:
-      allOf:
-      - $ref: '#/components/schemas/JsonSuccess'
-      - properties:
-          filters:
-            description: 'An array of tuples, each representing one of
-
-              the linkifiers set up in the
-
-              organization. Each of these tuples contain the
-
-              pattern, the formatted URL and the filter''s
-
-              ID, in that order. See the [Create
-
-              linkifiers](/api/add-linkifiers) article for
-
-              details on what each field means.
-
-              '
-            items:
-              items:
-                oneOf:
-                - type: string
-                - type: integer
-              type: array
-            type: array
-      - example:
-          filters:
-          - - '#(?P<id>[0-9]+)'
-            - https://github.com/zulip/zulip/issues/%(id)s
-            - 1
-          msg: ''
-          result: success
-    realmFiltersPostResponse:
-      allOf:
-      - $ref: '#/components/schemas/JsonSuccess'
-      - properties:
-          id:
-            description: 'The numeric ID assigned to this filter.
-
-              '
-            type: integer
-      - example:
-          id: 42
-          msg: ''
-          result: success
     registerPostResponse:
       allOf:
       - $ref: '#/components/schemas/JsonSuccess'
@@ -658,130 +513,6 @@ components:
               name: green_tick
               source_url: /user_avatars/1/emoji/images/1.png
           result: success
-    serverSettingsGetResponse:
-      allOf:
-      - $ref: '#/components/schemas/JsonSuccess'
-      - properties:
-          authentication_methods:
-            description: 'Each key-value pair in the object indicates whether the
-              authentication
-
-              method is enabled on this server.
-
-              '
-            type: object
-          email_auth_enabled:
-            description: 'Setting for allowing users authenticate with an email-password
-
-              combination.
-
-              '
-            type: boolean
-          external_authentication_methods:
-            description: 'List of dictionaries describing which external authentication
-              methods
-
-              are enabled and their parameters - most importantly the login url,
-
-              display_name and display_icon.
-
-              '
-            items:
-              type: object
-            type: array
-          is_incompatible:
-            description: 'Whether the Zulip client that has sent a request to this
-              endpoint is
-
-              deemed incompatible with the server.
-
-              '
-            type: boolean
-          push_notifications_enabled:
-            description: 'Whether mobile/push notifications are enabled.
-
-              '
-            type: boolean
-          realm_description:
-            description: 'HTML description of the organization, as configured by the
-              [organization
-
-              profile](/help/create-your-organization-profile).
-
-              '
-            type: string
-          realm_icon:
-            description: 'The URI of the organization''s mobile icon (usually a square
-              version of
-
-              the logo).
-
-              '
-            type: string
-          realm_name:
-            description: 'The realm''s name.
-
-              '
-            type: string
-          realm_uri:
-            description: 'The organization''s URI.
-
-              '
-            type: string
-          require_email_format_usernames:
-            description: 'Whether usernames should have an email address format. This
-              is important if your server has [LDAP
-
-              authentication](https://zulip.readthedocs.io/en/latest/production/authentication-methods.html#ldap-including-active-directory)
-
-              enabled with a username and password combination.
-
-              '
-            type: boolean
-          zulip_version:
-            description: 'The version of Zulip running in the server.
-
-              '
-            type: string
-      - example:
-          authentication_methods:
-            azuread: false
-            dev: true
-            email: true
-            github: true
-            google: true
-            ldap: false
-            password: true
-            remoteuser: false
-            saml: true
-          email_auth_enabled: true
-          external_authentication_methods:
-          - display_icon: null
-            display_name: SAML
-            login_url: /accounts/login/social/saml/idp_name
-            name: saml:idp_name
-            signup_url: /accounts/register/social/saml/idp_name
-          - display_icon: /static/images/landing-page/logos/googl_e-icon.png
-            display_name: Google
-            login_url: /accounts/login/social/google
-            name: google
-            signup_url: /accounts/register/social/google
-          - display_icon: /static/images/landing-page/logos/github-icon.png
-            display_name: GitHub
-            login_url: /accounts/login/social/github
-            name: github
-            signup_url: /accounts/register/social/github
-          is_incompatible: false
-          msg: ''
-          push_notifications_enabled: false
-          realm_description: <p>The Zulip development environment default organization.  It's
-            great for testing!</p>
-          realm_icon: https://secure.gravatar.com/avatar/62429d594b6ffc712f54aee976a18b44?d=identicon
-          realm_name: Zulip Dev
-          realm_uri: http://localhost:9991
-          require_email_format_usernames: true
-          result: success
-          zulip_version: 2.0.6+git
     settingsNotificationsPatchResponse:
       allOf:
       - $ref: '#/components/schemas/JsonSuccess'
@@ -960,36 +691,6 @@ components:
       - example:
           msg: ''
           result: success
-    userGroupsGetResponse:
-      allOf:
-      - $ref: '#/components/schemas/JsonSuccess'
-      - properties:
-          user_groups:
-            description: 'A list of `user_group` objects, which contain a `description`,
-              a `name`,
-
-              their `id` and the list of members of the user group.
-
-              '
-            items:
-              type: object
-            type: array
-      - example:
-          msg: ''
-          result: success
-          user_groups:
-          - description: Characters of Hamlet
-            id: 1
-            members:
-            - 3
-            - 4
-            name: hamletcharacters
-          - description: Other users
-            id: 2
-            members:
-            - 1
-            - 2
-            name: other users
     userGroupsGroupIdDeleteError:
       allOf:
       - $ref: '#/components/schemas/JsonError'
@@ -1063,91 +764,6 @@ components:
             website:
               status: active
               timestamp: 1532697622
-          result: success
-    usersGetResponse:
-      allOf:
-      - $ref: '#/components/schemas/JsonSuccess'
-      - properties:
-          members:
-            description: 'A list of `user` objects, each containing details about
-              a user in the
-
-              organization.
-
-              '
-            items:
-              type: object
-            type: array
-      - example:
-          members:
-          - avatar_url: https://secure.gravatar.com/avatar/818c212b9f8830dfef491b3f7da99a14?d=identicon&version=1
-            bot_type: null
-            date_joined: '2019-10-20T07:50:53.728864+00:00'
-            email: AARON@zulip.com
-            full_name: aaron
-            is_active: true
-            is_admin: false
-            is_bot: false
-            is_guest: false
-            profile_data: {}
-            timezone: ''
-            user_id: 7
-          - avatar_url: https://secure.gravatar.com/avatar/6d8cad0fd00256e7b40691d27ddfd466?d=identicon&version=1
-            bot_type: null
-            date_joined: '2019-10-20T07:50:53.729659+00:00'
-            email: hamlet@zulip.com
-            full_name: King Hamlet
-            is_active: true
-            is_admin: false
-            is_bot: false
-            is_guest: false
-            profile_data:
-              '1':
-                rendered_value: <p>+0-11-23-456-7890</p>
-                value: +0-11-23-456-7890
-              '2':
-                rendered_value: '<p>I am:</p>
-
-                  <ul>
-
-                  <li>The prince of Denmark</li>
-
-                  <li>Nephew to the usurping Claudius</li>
-
-                  </ul>'
-                value: 'I am:
-
-                  * The prince of Denmark
-
-                  * Nephew to the usurping Claudius'
-              '3':
-                rendered_value: <p>Dark chocolate</p>
-                value: Dark chocolate
-              '4':
-                value: vim
-              '5':
-                value: 1900-1-1
-              '6':
-                value: https://blog.zulig.org
-              '7':
-                value: '[11]'
-              '8':
-                value: zulipbot
-            timezone: ''
-            user_id: 10
-          - avatar_url: https://secure.gravatar.com/avatar/7328586831cdbb1627649bd857b1ee8c?d=identicon&version=1
-            bot_owner_id: 11
-            bot_type: 1
-            date_joined: '2019-10-20T12:52:17.862053+00:00'
-            email: iago-bot@zulipdev.com
-            full_name: Iago's Bot
-            is_active: true
-            is_admin: false
-            is_bot: true
-            is_guest: false
-            timezone: ''
-            user_id: 23
-          msg: ''
           result: success
     usersMeDeleteError:
       allOf:
@@ -1277,42 +893,6 @@ components:
           result: success
           short_name: iago
           user_id: 5
-    usersMeStreamIdTopicsGetError:
-      allOf:
-      - $ref: '#/components/schemas/JsonError'
-      - example:
-          code: BAD_REQUEST
-          msg: Invalid stream id
-          result: error
-    usersMeStreamIdTopicsGetResponse:
-      allOf:
-      - $ref: '#/components/schemas/JsonSuccess'
-      - properties:
-          topics:
-            items:
-              properties:
-                max_id:
-                  description: 'The ID of the last message sent to the topic.
-
-                    '
-                  type: number
-                name:
-                  description: 'The name of the topic.
-
-                    '
-                  type: string
-              type: object
-            type: array
-      - example:
-          msg: ''
-          result: success
-          topics:
-          - max_id: 26
-            name: Denmark3
-          - max_id: 23
-            name: Denmark1
-          - max_id: 6
-            name: Denmark2
     usersMeSubscriptionsDeleteResponse:
       allOf:
       - $ref: '#/components/schemas/JsonSuccess'
@@ -1451,34 +1031,6 @@ components:
           - new stream
           result: success
           subscribed: {}
-    usersMeSubscriptionsPropertiesPostResponse:
-      allOf:
-      - $ref: '#/components/schemas/JsonSuccess'
-      - properties:
-          subscription_data:
-            description: 'The same `subscription_data` object sent by the client for
-              the request.
-
-              '
-            items:
-              type: object
-            type: array
-      - example:
-          msg: ''
-          result: success
-          subscription_data:
-          - property: pin_to_top
-            stream_id: 1
-            value: true
-          - property: color
-            stream_id: 3
-            value: f00
-    usersPostError:
-      allOf:
-      - $ref: '#/components/schemas/JsonError'
-      - example:
-          msg: Email 'newbie@zulip.com' already in use
-          result: error
     usersUserIdDeleteError:
       allOf:
       - $ref: '#/components/schemas/JsonError'
@@ -1671,101 +1223,6 @@ paths:
                 $ref: '#/components/schemas/ApiKeyResponse'
           description: Success.
       security: []
-  /events:
-    delete:
-      description: 'Delete a previously registered queue.
-
-        '
-      parameters:
-      - description: 'The ID of a queue that you registered via `POST /api/v1/register`(see
-
-          [Register a queue](/api/register-queue).
-
-          '
-        example: 1375801870:2942
-        in: query
-        name: queue_id
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/JsonSuccess'
-          description: Success.
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BadEventQueueIdError'
-          description: Bad request.
-    get:
-      description: 'Receive new events from [a registered event queue](/api/register-queue).
-
-        '
-      parameters:
-      - description: 'The ID of a queue that you registered via `POST /api/v1/register`
-          (see
-
-          [Register a queue](/api/register-queue)).
-
-          '
-        example: 1375801870:2942
-        in: query
-        name: queue_id
-        schema:
-          type: string
-      - description: 'The highest event ID in this queue that you''ve received and
-
-          wish to acknowledge. See the [code for
-
-          `call_on_each_event`](https://github.com/zulip/python-zulip-api/blob/master/zulip/zulip/__init__.py)
-
-          in the [zulip Python
-
-          module](https://github.com/zulip/python-zulip-api) for an
-
-          example implementation of correctly processing each event
-
-          exactly once.
-
-          '
-        example: -1
-        in: query
-        name: last_event_id
-        schema:
-          type: integer
-      - description: 'Set to `true` if the client is requesting a nonblocking reply.
-          If not
-
-          specified, the request will block until either a new event is available
-
-          or a few minutes have passed, in which case the server will send the
-
-          client a heartbeat event.
-
-          '
-        example: true
-        in: query
-        name: dont_block
-        schema:
-          default: false
-          type: boolean
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/eventsGetResponse'
-          description: Success.
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BadEventQueueIdError'
-          description: Bad request.
   /fetch_api_key:
     post:
       description: 'Given a username and password, fetch the user''s API key.
@@ -2305,34 +1762,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/messagesMessageIdPatchError'
           description: Bad request.
-  /messages/{message_id}/history:
-    get:
-      description: 'Get the different versions of a previously edited message.
-
-        '
-      parameters:
-      - description: 'The ID of the message you want to fetch the history of.
-
-          '
-        example: 42
-        in: path
-        name: message_id
-        required: true
-        schema:
-          type: integer
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/messagesMessageIdHistoryGetResponse'
-          description: Success.
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/InvalidMessageError'
-          description: Bad request.
   /messages/{message_id}/reactions:
     delete:
       description: 'Delete an emoji reaction from a message.
@@ -2572,59 +2001,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/realmEmojiEmojiNamePostResponse'
           description: Success.
-  /realm/filters:
-    get:
-      description: 'Fetch all the filters set up for the user''s organization.
-
-        '
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/realmFiltersGetResponse'
-          description: Success.
-    post:
-      description: 'Establish patterns in the messages that should be automatically
-
-        linkified.
-
-        '
-      parameters:
-      - description: 'The [Python regular
-
-          expression](https://docs.python.org/3/howto/regex.html) that should
-
-          trigger the linkifier.
-
-          '
-        example: '#(?P<id>[0-9]+)'
-        in: query
-        name: pattern
-        required: true
-        schema:
-          type: string
-      - description: 'The URL used for the link. If you used named groups for the
-          `pattern`,
-
-          you can insert their content here with
-
-          `%(name_of_the_capturing_group)s`.
-
-          '
-        example: https://github.com/zulip/zulip/issues/%(id)s
-        in: query
-        name: url_format_string
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/realmFiltersPostResponse'
-          description: Success.
   /realm/filters/{filter_id}:
     delete:
       description: 'Remove an organization filter.
@@ -2808,18 +2184,6 @@ paths:
           description: 'Bad request.
 
             '
-  /server_settings:
-    get:
-      description: 'Fetch global settings for the Zulip server.
-
-        '
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/serverSettingsGetResponse'
-          description: Success.
   /settings/notifications:
     patch:
       description: 'Modify the user''s preferences for notifications.
@@ -3244,18 +2608,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/JsonSuccess'
           description: Success.
-  /user_groups:
-    get:
-      description: 'Get all user groups of the realm.
-
-        '
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/userGroupsGetResponse'
-          description: Success.
   /user_groups/create:
     post:
       description: 'Create a user group.
@@ -3433,102 +2785,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/userUploadsRealmIdStrFilenameGetResponse'
           description: Success.
-  /users:
-    get:
-      description: 'Retrieve all users in a realm.
-
-        '
-      parameters:
-      - description: 'The `client_gravatar` field is set to `true` if clients can
-          compute
-
-          their own gravatars.
-
-          '
-        example: true
-        in: query
-        name: client_gravatar
-        schema:
-          default: false
-          type: boolean
-      - description: 'Set to `true` if the client wants custom profile field data
-          to be
-
-          included in the response.
-
-
-          **Changes**: New in Zulip 2.1.0.  Previous versions do no offer these
-
-          data via the API.
-
-          '
-        example: true
-        in: query
-        name: include_custom_profile_fields
-        schema:
-          default: false
-          type: boolean
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/usersGetResponse'
-          description: Success.
-    post:
-      description: 'Create a new user in a realm.
-
-        '
-      parameters:
-      - description: 'The email address of the new user.
-
-          '
-        example: username@example.com
-        in: query
-        name: email
-        required: true
-        schema:
-          type: string
-      - description: 'The password of the new user.
-
-          '
-        example: abcd1234
-        in: query
-        name: password
-        required: true
-        schema:
-          type: string
-      - description: 'The full name of the new user.
-
-          '
-        example: New User
-        in: query
-        name: full_name
-        required: true
-        schema:
-          type: string
-      - description: 'The short name of the new user.  Not user-visible.
-
-          '
-        example: newuser
-        in: query
-        name: short_name
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/JsonSuccess'
-          description: Success.
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/usersPostError'
-          description: Bad request.
   /users/me:
     delete:
       description: 'Delete the requesting user from the realm.
@@ -3931,74 +3187,6 @@ paths:
                   - example:
                       msg: Topic is not muted
                       result: error
-          description: Bad request.
-  /users/me/subscriptions/properties:
-    post:
-      description: 'Make bulk modifications of the subscription properties on one
-        or more
-
-        streams the user is subscribed to.
-
-        '
-      parameters:
-      - description: 'A list of objects that describe the changes that should be applied
-          in
-
-          each subscription. Each object represents a subscription, and must have
-
-          a `stream_id` key that identifies the stream, as well as the `property`
-
-          being modified and its new `value`.
-
-          '
-        example:
-        - property: pin_to_top
-          stream_id: 1
-          value: true
-        - property: color
-          stream_id: 3
-          value: '#f00f00'
-        in: query
-        name: subscription_data
-        required: true
-        schema:
-          items:
-            type: object
-          type: array
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/usersMeSubscriptionsPropertiesPostResponse'
-          description: Success.
-  /users/me/{stream_id}/topics:
-    get:
-      description: 'Get all the topics in a specific stream.
-
-        '
-      parameters:
-      - description: 'The unique ID of the stream.
-
-          '
-        example: 42
-        in: path
-        name: stream_id
-        required: true
-        schema:
-          type: integer
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/usersMeStreamIdTopicsGetResponse'
-          description: Success.
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/usersMeStreamIdTopicsGetError'
           description: Bad request.
   /users/{email}/presence:
     get:
