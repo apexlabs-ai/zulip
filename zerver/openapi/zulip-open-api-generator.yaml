@@ -171,8 +171,19 @@ components:
           type: int
         sender_short_name:
           type: string
+        subject:
+          type: string
         timestamp:
           type: int
+        type:
+          type: string
+      type: object
+    MessageEvent:
+      properties:
+        id:
+          type: in
+        message:
+          $ref: '#/components/Message'
         type:
           type: string
       type: object
@@ -222,6 +233,70 @@ components:
           code: BAD_REQUEST
           msg: User not authorized for this query
           result: error
+    eventsGetResponse:
+      allOf:
+      - $ref: '#/components/schemas/JsonSuccess'
+      - properties:
+          events:
+            description: 'An array of `event` objects (possibly zero-length if `dont_block`
+              is
+
+              set) of events with IDs newer than `last_event_id`. Event IDs are
+
+              guaranteed to be increasing, but they are not guaranteed to be
+
+              consecutive.
+
+              '
+            items:
+              $ref: '#/components/schemas/MessageEvent'
+            type: array
+      - example:
+          events:
+          - id: 0
+            message:
+              avatar_url: https://url/for/othello-bots/avatar
+              client: website
+              content: I come not, friends, to steal away your hearts.
+              content_type: text/x-markdown
+              display_recipient: Denmark
+              id: 12345678
+              recipient_id: 12314
+              sender_email: othello-bot@example.com
+              sender_full_name: Othello Bot
+              sender_id: 13215
+              sender_realm_str: example
+              sender_short_name: othello-bot
+              timestamp: 1375978403
+              topic: Castle
+              topic_links: []
+              type: stream
+            type: message
+          - id: 1
+            message:
+              avatar_url: https://url/for/othello-bots/avatar
+              client: website
+              content: With mirth and laughter let old wrinkles come.
+              content_type: text/x-markdown
+              display_recipient:
+              - email: hamlet@example.com
+                full_name: Hamlet of Denmark
+                id: 31572
+                short_name: hamlet
+              id: 12345679
+              recipient_id: 18391
+              sender_email: othello-bot@example.com
+              sender_full_name: Othello Bot
+              sender_id: 13215
+              sender_realm_str: example
+              sender_short_name: othello-bot
+              subject: ''
+              timestamp: 1375978404
+              topic_links: []
+              type: private
+            type: message
+          msg: ''
+          result: success
     getStreamIdGetError:
       allOf:
       - $ref: '#/components/schemas/CodedError'
@@ -1220,6 +1295,101 @@ paths:
                 $ref: '#/components/schemas/ApiKeyResponse'
           description: Success.
       security: []
+  /events:
+    delete:
+      description: 'Delete a previously registered queue.
+
+        '
+      parameters:
+      - description: 'The ID of a queue that you registered via `POST /api/v1/register`(see
+
+          [Register a queue](/api/register-queue).
+
+          '
+        example: 1375801870:2942
+        in: query
+        name: queue_id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsonSuccess'
+          description: Success.
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEventQueueIdError'
+          description: Bad request.
+    get:
+      description: 'Receive new events from [a registered event queue](/api/register-queue).
+
+        '
+      parameters:
+      - description: 'The ID of a queue that you registered via `POST /api/v1/register`
+          (see
+
+          [Register a queue](/api/register-queue)).
+
+          '
+        example: 1375801870:2942
+        in: query
+        name: queue_id
+        schema:
+          type: string
+      - description: 'The highest event ID in this queue that you''ve received and
+
+          wish to acknowledge. See the [code for
+
+          `call_on_each_event`](https://github.com/zulip/python-zulip-api/blob/master/zulip/zulip/__init__.py)
+
+          in the [zulip Python
+
+          module](https://github.com/zulip/python-zulip-api) for an
+
+          example implementation of correctly processing each event
+
+          exactly once.
+
+          '
+        example: -1
+        in: query
+        name: last_event_id
+        schema:
+          type: integer
+      - description: 'Set to `true` if the client is requesting a nonblocking reply.
+          If not
+
+          specified, the request will block until either a new event is available
+
+          or a few minutes have passed, in which case the server will send the
+
+          client a heartbeat event.
+
+          '
+        example: true
+        in: query
+        name: dont_block
+        schema:
+          default: false
+          type: boolean
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/eventsGetResponse'
+          description: Success.
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEventQueueIdError'
+          description: Bad request.
   /fetch_api_key:
     post:
       description: 'Given a username and password, fetch the user''s API key.

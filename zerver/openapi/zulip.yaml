@@ -154,7 +154,7 @@ paths:
                         guaranteed to be increasing, but they are not guaranteed to be
                         consecutive.
                       items:
-                        type: object
+                        $ref: '#/components/schemas/MessageEvent'
                 - example:
                     {
                         "events": [
@@ -3748,6 +3748,8 @@ components:
           type: string
         timestamp:
           type: int
+        subject:
+          type: string
     Stream:
       type: object
       properties:
@@ -3760,7 +3762,18 @@ components:
         stream_id:
           type: int
 
-#  ###################
+    MessageEvent:
+      type: object
+      properties:
+        id:
+          type: int
+        message:
+          $ref: '#/components/Message'
+        type:
+          type: string
+
+
+  #  ###################
   # Shared responses
   ###################
   responses:

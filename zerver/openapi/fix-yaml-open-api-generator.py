@@ -5,7 +5,6 @@ import stringcase
 
 
 BROKEN_PATHS = [
-    '/events',
     '/messages/{message_id}/history',
     '/realm/filters',
     '/server_settings',
@@ -18,7 +17,6 @@ BROKEN_PATHS = [
 
 with open('zulip.yaml') as stream:
     schema = yaml.safe_load(stream)
-
 
 # Remove broken paths from schema
 for path in BROKEN_PATHS:
