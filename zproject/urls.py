@@ -662,6 +662,9 @@ v1_api_mobile_patterns = [
     url(r'^fetch_api_key$', zerver.views.auth.api_fetch_api_key,
         name='zerver.views.auth.api_fetch_api_key'),
 
+    url(r'^jwt_fetch_api_key$', zerver.views.auth.api_jwt_fetch_api_key,
+        name='zerver.views.auth.api_jwt_fetch_api_key'),
+
     # This is for the signing in through the devAuthBackEnd on mobile apps.
     url(r'^dev_fetch_api_key$', zerver.views.auth.api_dev_fetch_api_key,
         name='zerver.views.auth.api_dev_fetch_api_key'),

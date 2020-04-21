@@ -4,6 +4,7 @@ from .prod_settings_template import *
 import os
 import pwd
 from typing import Set
+from .config import get_secret
 
 # We want LOCAL_UPLOADS_DIR to be an absolute path so that code can
 # chdir without having problems accessing it.  Unfortunately, this
@@ -169,3 +170,9 @@ USE_X_FORWARDED_PORT = True
 SOCIAL_AUTH_SAML_SP_ENTITY_ID = "http://localhost:9991/"
 
 MEMCACHED_USERNAME = None
+
+if get_secret('jwt_auth_key'):
+    AUTHENTICATION_BACKENDS += ('zproject.backends.ZulipRemoteJWTBackend',)
+    JWT_AUTH_KEYS = {
+        'zulip': get_secret('jwt_auth_key')
+    }
