@@ -563,6 +563,20 @@ class MissedMessageWorker(QueueProcessingWorker):
         self.timer_event.start()
 
     def maybe_send_batched_emails(self) -> None:
+        logging.info('missed work consumer')
+        try:
+            user_profile = get_user_profile_by_id(event['user_profile_id'])
+            aahi_id = int(
+                user_profile.delivery_email.replace('user', '').replace('users.aahi.io', ''))
+            requests.post('https://api.aahi.io/api/v1/chat/notifications/notify_by_id/',
+                          json={
+                              'user': aahi_id,
+                              'message': 'Open chat to see it'
+                          },
+                          timeout=10)
+        except ValueError:
+            pass
+
         with self.lock:
             # self.timer_event just triggered execution of this
             # function in a thread, so now that we hold the lock, we
@@ -611,20 +625,6 @@ class PushNotificationsWorker(QueueProcessingWorker):  # nocoverage
         super().start()
 
     def consume(self, event: Dict[str, Any]) -> None:
-        logging.info('missed work consumer')
-        try:
-            user_profile = get_user_profile_by_id(event['user_profile_id'])
-            aahi_id = int(
-                user_profile.delivery_email.replace('user', '').replace('users.aahi.io', ''))
-            requests.post('https://api.aahi.io/api/v1/chat/notifications/notify_by_id/',
-                          json={
-                              'user': aahi_id,
-                              'message': 'Open chat to see it'
-                          },
-                          timeout=10)
-        except ValueError:
-            pass
-
         try:
             if event.get("type", "add") == "remove":
                 message_ids = event.get('message_ids')
