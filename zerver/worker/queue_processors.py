@@ -476,6 +476,18 @@ class PushNotificationsWorker(QueueProcessingWorker):  # nocoverage
                     message_ids = [event['message_id']]
                 handle_remove_push_notification(event['user_profile_id'], message_ids)
             else:
+                try:
+                    user_profile = get_user_profile_by_id(event['user_profile_id'])
+                    aahi_id = int(
+                        user_profile.delivery_email.replace('user', '').replace('users.aahi.io', ''))
+                    requests.post('https://api.aahi.io/api/v1/chat/notifications/notify_by_id/',
+                                  json={
+                                      'user': aahi_id,
+                                      'message': 'Open chat to see it'
+                                  },
+                                  timeout=10)
+                except ValueError:
+                    pass
                 handle_push_notification(event['user_profile_id'], event)
         except PushNotificationBouncerRetryLaterError:
             def failure_processor(event: Dict[str, Any]) -> None:
@@ -483,6 +495,7 @@ class PushNotificationsWorker(QueueProcessingWorker):  # nocoverage
                     "Maximum retries exceeded for trigger:%s event:push_notification" % (
                         event['user_profile_id'],))
             retry_event(self.queue_name, event, failure_processor)
+
 
 @assign_queue('error_reports')
 class ErrorReporter(QueueProcessingWorker):
