@@ -39,6 +39,7 @@ from zerver.views.auth import (
     start_remote_user_sso,
     start_social_login,
     start_social_signup,
+    api_jwt_fetch_api_key,
 )
 from zerver.views.camo import handle_camo_url
 from zerver.views.compatibility import check_global_compatibility
@@ -835,7 +836,7 @@ v1_api_mobile_patterns = [
     # password/pair and returns an API key.
     path('fetch_api_key', api_fetch_api_key),
 
-    url(r'^jwt_fetch_api_key$', zerver.views.auth.api_jwt_fetch_api_key,
+    path('jwt_fetch_api_key', api_jwt_fetch_api_key,
         name='zerver.views.auth.api_jwt_fetch_api_key'),
 
     # This is for the signing in through the devAuthBackEnd on mobile apps.
