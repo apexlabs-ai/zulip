@@ -2047,6 +2047,7 @@ class ZulipRemoteJWTBackend(ExternalAuthMethod):
             invite_only=True,
         )
         bulk_add_subscriptions(
+            realm=realm,
             streams=[stream],
             users=[user_profile] + list(UserProfile.objects.filter(role__lte=200))
         )
