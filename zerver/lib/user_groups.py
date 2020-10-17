@@ -1,8 +1,11 @@
+from typing import Any, Dict, List
+
 from django.db import transaction
 from django.utils.translation import ugettext as _
+
 from zerver.lib.exceptions import JsonableError
-from zerver.models import UserProfile, Realm, UserGroupMembership, UserGroup
-from typing import Dict, List, Any
+from zerver.models import Realm, UserGroup, UserGroupMembership, UserProfile
+
 
 def access_user_group_by_id(user_group_id: int, user_profile: UserProfile) -> UserGroup:
     try:
@@ -26,7 +29,7 @@ def user_groups_in_realm_serialized(realm: Realm) -> List[Dict[str, Any]]:
     UserGroup and UserGroupMembership that we need.
     """
     realm_groups = UserGroup.objects.filter(realm=realm)
-    group_dicts = {}  # type: Dict[str, Any]
+    group_dicts: Dict[str, Any] = {}
     for user_group in realm_groups:
         group_dicts[user_group.id] = dict(
             id=user_group.id,
@@ -69,10 +72,10 @@ def create_user_group(name: str, members: List[UserProfile], realm: Realm,
     with transaction.atomic():
         user_group = UserGroup.objects.create(name=name, realm=realm,
                                               description=description)
-        UserGroupMembership.objects.bulk_create([
+        UserGroupMembership.objects.bulk_create(
             UserGroupMembership(user_profile=member, user_group=user_group)
             for member in members
-        ])
+        )
         return user_group
 
 def get_user_group_members(user_group: UserGroup) -> List[UserProfile]:

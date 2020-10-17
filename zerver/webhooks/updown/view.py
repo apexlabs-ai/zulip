@@ -4,11 +4,11 @@ from typing import Any, Dict, List
 
 from django.http import HttpRequest, HttpResponse
 
-from zerver.decorator import api_key_only_webhook_view
+from zerver.decorator import webhook_view
+from zerver.lib.exceptions import UnsupportedWebhookEventType
 from zerver.lib.request import REQ, has_request_variables
 from zerver.lib.response import json_success
-from zerver.lib.webhooks.common import UnexpectedWebhookEventType, \
-    check_send_webhook_message
+from zerver.lib.webhooks.common import check_send_webhook_message
 from zerver.models import UserProfile
 
 TOPIC_TEMPLATE = "{service_url}"
@@ -24,11 +24,11 @@ def get_body_for_up_event(event: Dict[str, Any]) -> str:
     body = "Service is `up`"
     event_downtime = event['downtime']
     if event_downtime['started_at']:
-        body = "{} again".format(body)
+        body = f"{body} again"
         string_date = get_time_string_based_on_duration(event_downtime['duration'])
         if string_date:
-            body = "{} after {}".format(body, string_date)
-    return "{}.".format(body)
+            body = f"{body} after {string_date}"
+    return f"{body}."
 
 def get_time_string_based_on_duration(duration: int) -> str:
     days, reminder = divmod(duration, 86400)
@@ -44,9 +44,9 @@ def get_time_string_based_on_duration(duration: int) -> str:
 
 def add_time_part_to_string_date_if_needed(value: int, text_name: str) -> str:
     if value == 1:
-        return "1 {} ".format(text_name)
+        return f"1 {text_name} "
     if value > 1:
-        return "{} {}s ".format(value, text_name)
+        return f"{value} {text_name}s "
     return ''
 
 def get_body_for_down_event(event: Dict[str, Any]) -> str:
@@ -54,11 +54,11 @@ def get_body_for_down_event(event: Dict[str, Any]) -> str:
         event['downtime']['error'],
         event['downtime']['started_at'].replace('T', ' ').replace('Z', ' UTC'))
 
-@api_key_only_webhook_view('Updown')
+@webhook_view('Updown')
 @has_request_variables
 def api_updown_webhook(
         request: HttpRequest, user_profile: UserProfile,
-        payload: List[Dict[str, Any]]=REQ(argument_type='body')
+        payload: List[Dict[str, Any]]=REQ(argument_type='body'),
 ) -> HttpResponse:
     for event in payload:
         send_message_for_event(request, user_profile, event)
@@ -66,7 +66,7 @@ def api_updown_webhook(
 
 EVENT_TYPE_BODY_MAPPER = {
     'up': get_body_for_up_event,
-    'down': get_body_for_down_event
+    'down': get_body_for_down_event,
 }
 
 def get_event_type(event: Dict[str, Any]) -> str:
@@ -75,4 +75,4 @@ def get_event_type(event: Dict[str, Any]) -> str:
         event_type = event_type_match.group(1)
         if event_type in EVENT_TYPE_BODY_MAPPER:
             return event_type
-    raise UnexpectedWebhookEventType('Updown', event['event'])
+    raise UnsupportedWebhookEventType(event['event'])

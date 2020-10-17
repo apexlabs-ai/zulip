@@ -6,13 +6,14 @@ from django.conf import settings
 from django.core.cache import cache
 from django.db.models.signals import post_migrate
 
+
 def flush_cache(sender: AppConfig, **kwargs: Any) -> None:
     logging.info("Clearing memcached cache after migrations")
     cache.clear()
 
 
 class ZerverConfig(AppConfig):
-    name = "zerver"  # type: str
+    name: str = "zerver"
 
     def ready(self) -> None:
         # We import zerver.signals here for the side effect of

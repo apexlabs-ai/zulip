@@ -19,6 +19,7 @@ below will direct you to the official documentation for these projects.
 
 - [eslint](https://eslint.org)
 - [mypy](http://mypy-lang.org/)
+- [Prettier](https://prettier.io/)
 - [puppet](https://puppet.com/) (puppet provides its own mechanism for
   validating manifests)
 - [pyflakes](https://pypi.python.org/pypi/pyflakes)
@@ -48,8 +49,8 @@ note are:
 * `--skip` and `--only`: Only run certain linters.
 * `-m`: Only check modified files.
 
-Finally, you can rely on our Travis CI setup to run linters for you, but
-it is good practice to run lint checks locally.
+Finally, you can rely on our CircleCI setup to run linters for you,
+but it is good practice to run lint checks locally.
 
 ```eval_rst
 .. important::
@@ -100,6 +101,7 @@ following checks:
 
 - Check Python code with pyflakes.
 - Check JavaScript and TypeScript code with eslint.
+- Check CSS, JavaScript, TypeScript, and YAML formatting with Prettier.
 - Check Python code for custom Zulip rules.
 - Check non-Python code for custom Zulip rules.
 - Check puppet manifests with the puppet validator.
@@ -124,9 +126,7 @@ eslint, and other home grown tools.
 You can find the source code [here](https://github.com/zulip/zulip/blob/master/tools/lint).
 
 In order for our entire lint suite to run in a timely fashion, the `lint`
-script performs several lint checks in parallel by forking out subprocesses.  This mechanism
-is still evolving, but you can look at the method `run_parallel` to get the
-gist of how it works.
+script performs several lint checks in parallel by forking out subprocesses.
 
 Note that our project does custom regex-based checks on the code, and we
 also customize how we call pyflakes and pycodestyle (pep8).  The code for these
@@ -184,6 +184,7 @@ that we exempt may be deemed not worthwhile to fix.
 
 We check our JavaScript code in a few different ways:
 - We run eslint.
+- We check code formatting with Prettier.
 - We perform custom Zulip regex checks on the code.
 
 #### Puppet manifests
@@ -192,7 +193,7 @@ We use Puppet as our tool to manage configuration files, using
 puppet "manifests."  To lint puppet manifests, we use the "parser validate"
 option of puppet.
 
-#### HTML Templates
+#### HTML templates
 
 Zulip uses two HTML templating systems:
 
@@ -212,7 +213,7 @@ clean those files up eventually.
 
 Zulip uses [stylelint](https://github.com/stylelint/stylelint) to lint
 its CSS; see our
-[configuration](https://github.com/zulip/zulip/blob/master/.stylelintrc)
+[configuration](https://github.com/zulip/zulip/blob/master/stylelint.config.js)
 for the rules we currently enforce.
 
 #### Shell scripts

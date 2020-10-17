@@ -1,5 +1,6 @@
 from typing import Any, Dict, List
 
+
 class UserHandler:
     '''
     Our UserHandler class is a glorified wrapper
@@ -9,8 +10,9 @@ class UserHandler:
     The class helps us do things like map ids
     to names for mentions.
     '''
+
     def __init__(self) -> None:
-        self.id_to_user_map = dict()  # type: Dict[int, Dict[str, Any]]
+        self.id_to_user_map: Dict[int, Dict[str, Any]] = {}
 
     def add_user(self, user: Dict[str, Any]) -> None:
         user_id = user['id']

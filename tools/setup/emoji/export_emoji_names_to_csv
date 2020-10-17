@@ -10,18 +10,18 @@ import argparse
 import csv
 import os
 import re
-import ujson
+from typing import Any, Dict, List
+
+import orjson
 
 from emoji_setup_utils import get_emoji_code
-
-from typing import Any, Dict, List
 
 TOOLS_DIR_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ZULIP_PATH = os.path.dirname(TOOLS_DIR_PATH)
 # `emoji.json` file is same in all four emoji-datasource packages.
 EMOJI_DATA_PATH = os.path.join(ZULIP_PATH, 'node_modules', 'emoji-datasource-google', 'emoji.json')
 
-sorting_info = {}   # type: Dict[str, Any]
+sorting_info: Dict[str, Any] = {}
 column_names = [
     'Codepoint',
     'New sorting info',
@@ -47,9 +47,9 @@ name_entry_regex = re.compile(r"'(?P<emoji_code>[a-z0-9-]+)': "
 explanation_regex = re.compile(r"    # (?P<explanation_line>[^\r\n\t]+)")
 
 def prepare_sorting_info() -> None:
-    emoji_data = []     # type: List[Dict[str, Any]]
-    with open(EMOJI_DATA_PATH) as fp:
-        emoji_data = ujson.load(fp)
+    emoji_data: List[Dict[str, Any]] = []
+    with open(EMOJI_DATA_PATH, "rb") as fp:
+        emoji_data = orjson.loads(fp.read())
 
     for emoji_dict in emoji_data:
         emoji_code = get_emoji_code(emoji_dict)
@@ -79,18 +79,18 @@ def main() -> None:
                    "takes the path of output csv file and path to `emoji_names.py` as arguments.")
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
-        "--input-file", dest="input_file_path", type=str, metavar="<path>",
+        "--input-file", dest="input_file_path", metavar="<path>",
         default=os.path.join(TOOLS_DIR_PATH, "setup", "emoji", "emoji_names.py"),
         help="Path to the file from which data is to be read.")
     parser.add_argument(
-        "--output-file", dest="output_file_path", type=str, metavar="<path>",
+        "--output-file", dest="output_file_path", metavar="<path>",
         default=os.path.join(TOOLS_DIR_PATH, "setup", "emoji", "emoji_names.csv"),
         help="Path to the output csv file.")
 
     args = parser.parse_args()
     prepare_sorting_info()
-    output_data = [column_names, ]
-    explanation_lines = []  # type: List[str]
+    output_data = [column_names]
+    explanation_lines: List[str] = []
     with open(args.input_file_path) as fp:
         for line in fp.readlines():
             match = name_entry_regex.search(line)

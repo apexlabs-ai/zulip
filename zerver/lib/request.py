@@ -1,26 +1,38 @@
+import threading
 from collections import defaultdict
 from functools import wraps
 from types import FunctionType
-import ujson
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    List,
+    Optional,
+    Sequence,
+    TypeVar,
+    Union,
+    cast,
+    overload,
+)
 
+import orjson
+from django.core.exceptions import ValidationError
+from django.http import HttpRequest, HttpResponse
 from django.utils.translation import ugettext as _
+from typing_extensions import Literal
 
-from zerver.lib.exceptions import JsonableError, ErrorCode, \
-    InvalidJSONError
+from zerver.lib.exceptions import ErrorCode, InvalidJSONError, JsonableError
 from zerver.lib.types import Validator, ViewFuncT
 
-from django.http import HttpRequest, HttpResponse
-
-from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar, Union, cast, overload
-from typing_extensions import Literal
 
 class RequestConfusingParmsError(JsonableError):
     code = ErrorCode.REQUEST_CONFUSING_VAR
     data_fields = ['var_name1', 'var_name2']
 
     def __init__(self, var_name1: str, var_name2: str) -> None:
-        self.var_name1 = var_name1  # type: str
-        self.var_name2 = var_name2  # type: str
+        self.var_name1: str = var_name1
+        self.var_name2: str = var_name2
 
     @staticmethod
     def msg_format() -> str:
@@ -31,7 +43,7 @@ class RequestVariableMissingError(JsonableError):
     data_fields = ['var_name']
 
     def __init__(self, var_name: str) -> None:
-        self.var_name = var_name  # type: str
+        self.var_name: str = var_name
 
     @staticmethod
     def msg_format() -> str:
@@ -42,7 +54,7 @@ class RequestVariableConversionError(JsonableError):
     data_fields = ['var_name', 'bad_value']
 
     def __init__(self, var_name: str, bad_value: Any) -> None:
-        self.var_name = var_name  # type: str
+        self.var_name: str = var_name
         self.bad_value = bad_value
 
     @staticmethod
@@ -64,15 +76,14 @@ class _REQ(Generic[ResultT]):
         self,
         whence: Optional[str] = None,
         *,
-        type: Type[ResultT] = Type[None],
         converter: Optional[Callable[[str], ResultT]] = None,
         default: Union[_NotSpecified, ResultT, None] = NotSpecified,
-        validator: Optional[Validator] = None,
-        str_validator: Optional[Validator] = None,
+        validator: Optional[Validator[ResultT]] = None,
+        str_validator: Optional[Validator[ResultT]] = None,
         argument_type: Optional[str] = None,
         intentionally_undocumented: bool=False,
         documentation_pending: bool=False,
-        aliases: Optional[List[str]] = None,
+        aliases: Sequence[str] = [],
         path_only: bool=False
     ) -> None:
         """whence: the name of the request variable that should be used
@@ -95,10 +106,6 @@ class _REQ(Generic[ResultT]):
         argument_type: pass 'body' to extract the parsed JSON
         corresponding to the request body
 
-        type: a hint to typing (using mypy) what the type of this parameter is.
-        Currently only typically necessary if default=None and the type cannot
-        be inferred in another way (eg. via converter).
-
         aliases: alternate names for the POST var
 
         path_only: Used for parameters included in the URL that we still want
@@ -106,7 +113,7 @@ class _REQ(Generic[ResultT]):
         """
 
         self.post_var_name = whence
-        self.func_var_name = None  # type: Optional[str]
+        self.func_var_name: Optional[str] = None
         self.converter = converter
         self.validator = validator
         self.str_validator = str_validator
@@ -117,12 +124,8 @@ class _REQ(Generic[ResultT]):
         self.documentation_pending = documentation_pending
         self.path_only = path_only
 
-        if converter and (validator or str_validator):
-            # Not user-facing, so shouldn't be tagged for translation
-            raise AssertionError('converter and validator are mutually exclusive')
-        if validator and str_validator:
-            # Not user-facing, so shouldn't be tagged for translation
-            raise AssertionError('validator and str_validator are mutually exclusive')
+        assert converter is None or (validator is None and str_validator is None), 'converter and validator are mutually exclusive'
+        assert validator is None or str_validator is None, 'validator and str_validator are mutually exclusive'
 
 # This factory function ensures that mypy can correctly analyze REQ.
 #
@@ -131,18 +134,20 @@ class _REQ(Generic[ResultT]):
 # functions using has_request_variables. In reality, REQ returns an
 # instance of class _REQ to enable the decorator to scan the parameter
 # list for _REQ objects and patch the parameters as the true types.
-
+#
+# See also this documentation to learn how @overload helps here.
+# https://zulip.readthedocs.io/en/latest/testing/mypy.html#using-overload-to-accurately-describe-variations
+#
 # Overload 1: converter
 @overload
 def REQ(
     whence: Optional[str] = ...,
     *,
-    type: Type[ResultT] = ...,
     converter: Callable[[str], ResultT],
     default: ResultT = ...,
     intentionally_undocumented: bool = ...,
     documentation_pending: bool = ...,
-    aliases: Optional[List[str]] = ...,
+    aliases: Sequence[str] = ...,
     path_only: bool = ...
 ) -> ResultT:
     ...
@@ -152,12 +157,11 @@ def REQ(
 def REQ(
     whence: Optional[str] = ...,
     *,
-    type: Type[ResultT] = ...,
     default: ResultT = ...,
-    validator: Validator,
+    validator: Validator[ResultT],
     intentionally_undocumented: bool = ...,
     documentation_pending: bool = ...,
-    aliases: Optional[List[str]] = ...,
+    aliases: Sequence[str] = ...,
     path_only: bool = ...
 ) -> ResultT:
     ...
@@ -167,12 +171,11 @@ def REQ(
 def REQ(
     whence: Optional[str] = ...,
     *,
-    type: Type[str] = ...,
     default: str = ...,
-    str_validator: Optional[Validator] = ...,
+    str_validator: Optional[Validator[str]] = ...,
     intentionally_undocumented: bool = ...,
     documentation_pending: bool = ...,
-    aliases: Optional[List[str]] = ...,
+    aliases: Sequence[str] = ...,
     path_only: bool = ...
 ) -> str:
     ...
@@ -182,12 +185,11 @@ def REQ(
 def REQ(
     whence: Optional[str] = ...,
     *,
-    type: Type[str] = ...,
     default: None,
-    str_validator: Optional[Validator] = ...,
+    str_validator: Optional[Validator[str]] = ...,
     intentionally_undocumented: bool = ...,
     documentation_pending: bool = ...,
-    aliases: Optional[List[str]] = ...,
+    aliases: Sequence[str] = ...,
     path_only: bool = ...
 ) -> Optional[str]:
     ...
@@ -197,13 +199,11 @@ def REQ(
 def REQ(
     whence: Optional[str] = ...,
     *,
-    type: Type[ResultT] = ...,
     default: ResultT = ...,
-    str_validator: Optional[Validator] = ...,
     argument_type: Literal["body"],
     intentionally_undocumented: bool = ...,
     documentation_pending: bool = ...,
-    aliases: Optional[List[str]] = ...,
+    aliases: Sequence[str] = ...,
     path_only: bool = ...
 ) -> ResultT:
     ...
@@ -212,20 +212,18 @@ def REQ(
 def REQ(
     whence: Optional[str] = None,
     *,
-    type: Type[ResultT] = Type[None],
     converter: Optional[Callable[[str], ResultT]] = None,
     default: Union[_REQ._NotSpecified, ResultT] = _REQ.NotSpecified,
-    validator: Optional[Validator] = None,
-    str_validator: Optional[Validator] = None,
+    validator: Optional[Validator[ResultT]] = None,
+    str_validator: Optional[Validator[ResultT]] = None,
     argument_type: Optional[str] = None,
     intentionally_undocumented: bool=False,
     documentation_pending: bool=False,
-    aliases: Optional[List[str]] = None,
+    aliases: Sequence[str] = [],
     path_only: bool = False
 ) -> ResultT:
     return cast(ResultT, _REQ(
         whence,
-        type=type,
         converter=converter,
         default=default,
         validator=validator,
@@ -237,7 +235,7 @@ def REQ(
         path_only=path_only,
     ))
 
-arguments_map = defaultdict(list)  # type: Dict[str, List[str]]
+arguments_map: Dict[str, List[str]] = defaultdict(list)
 
 # Extracts variables from the request object and passes them as
 # named function arguments.  The request object must be the first
@@ -282,7 +280,7 @@ def has_request_variables(view_func: ViewFuncT) -> ViewFuncT:
                 arguments_map[view_func_full_name].append(value.post_var_name)
 
     @wraps(view_func)
-    def _wrapped_view_func(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+    def _wrapped_view_func(request: HttpRequest, *args: object, **kwargs: object) -> HttpResponse:
         for param in post_params:
             func_var_name = param.func_var_name
             if param.path_only:
@@ -299,22 +297,21 @@ def has_request_variables(view_func: ViewFuncT) -> ViewFuncT:
 
             if param.argument_type == 'body':
                 try:
-                    val = ujson.loads(request.body)
-                except ValueError:
+                    val = orjson.loads(request.body)
+                except orjson.JSONDecodeError:
                     raise InvalidJSONError(_("Malformed JSON"))
                 kwargs[func_var_name] = val
                 continue
-            elif param.argument_type is not None:
+            else:
                 # This is a view bug, not a user error, and thus should throw a 500.
-                raise Exception(_("Invalid argument type"))
+                assert param.argument_type is None, "Invalid argument type"
 
             post_var_names = [param.post_var_name]
-            if param.aliases:
-                post_var_names += param.aliases
+            post_var_names += param.aliases
 
             default_assigned = False
 
-            post_var_name = None  # type: Optional[str]
+            post_var_name: Optional[str] = None
 
             for req_var in post_var_names:
                 if req_var in request.POST:
@@ -349,22 +346,43 @@ def has_request_variables(view_func: ViewFuncT) -> ViewFuncT:
             # Validators are like converters, but they don't handle JSON parsing; we do.
             if param.validator is not None and not default_assigned:
                 try:
-                    val = ujson.loads(val)
-                except Exception:
-                    raise JsonableError(_('Argument "%s" is not valid JSON.') % (post_var_name,))
+                    val = orjson.loads(val)
+                except orjson.JSONDecodeError:
+                    raise JsonableError(_('Argument "{}" is not valid JSON.').format(post_var_name))
 
-                error = param.validator(post_var_name, val)
-                if error:
-                    raise JsonableError(error)
+                try:
+                    val = param.validator(post_var_name, val)
+                except ValidationError as error:
+                    raise JsonableError(error.message)
 
             # str_validators is like validator, but for direct strings (no JSON parsing).
             if param.str_validator is not None and not default_assigned:
-                error = param.str_validator(post_var_name, val)
-                if error:
-                    raise JsonableError(error)
+                try:
+                    val = param.str_validator(post_var_name, val)
+                except ValidationError as error:
+                    raise JsonableError(error.message)
 
             kwargs[func_var_name] = val
 
         return view_func(request, *args, **kwargs)
 
-    return cast(ViewFuncT, _wrapped_view_func)
+    return cast(ViewFuncT, _wrapped_view_func)  # https://github.com/python/mypy/issues/1927
+
+
+local = threading.local()
+
+def get_current_request() -> Optional[HttpRequest]:
+    """Returns the current HttpRequest object; this should only be used by
+    logging frameworks, which have no other access to the current
+    request.  All other codepaths should pass through the current
+    request object, rather than rely on this thread-local global.
+
+    """
+    return getattr(local, 'request', None)
+
+def set_request(req: HttpRequest) -> None:
+    setattr(local, 'request', req)
+
+def unset_request() -> None:
+    if hasattr(local, 'request'):
+        delattr(local, 'request')

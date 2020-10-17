@@ -3,8 +3,11 @@ from typing import Any
 from django.core.management.base import CommandParser
 
 from zerver.lib.management import ZulipBaseCommand
-from zerver.lib.retention import restore_all_data_from_archive, \
-    restore_data_from_archive, restore_data_from_archive_by_realm
+from zerver.lib.retention import (
+    restore_all_data_from_archive,
+    restore_data_from_archive,
+    restore_data_from_archive_by_realm,
+)
 from zerver.models import ArchiveTransaction
 
 
@@ -26,11 +29,9 @@ To restore a specific ArchiveTransaction:
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument('-d', '--restore-deleted',
-                            dest='restore_deleted',
                             action='store_true',
                             help='Restore manually deleted messages.')
         parser.add_argument('-t', '--transaction-id',
-                            dest='transaction_id',
                             type=int,
                             help='Restore a specific ArchiveTransaction.')
 

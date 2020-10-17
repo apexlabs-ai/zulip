@@ -11,6 +11,7 @@ Usage:
 import argparse
 import configparser
 import os
+import shlex
 import subprocess
 import sys
 
@@ -19,7 +20,7 @@ sys.path.insert(0, ZULIP_PATH)
 from scripts.lib.zulip_tools import is_vagrant_env_host
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('path', metavar='FILE', type=str, nargs='+',
+parser.add_argument('path', metavar='FILE', nargs='+',
                     help='config file of dummy users in development server')
 args = parser.parse_args()
 
@@ -50,7 +51,7 @@ for zuliprc_path in zuliprc_paths_list:
 
         if is_vagrant_env_host(ZULIP_PATH):
             arguments = ['vagrant', 'ssh', '--command',
-                         './manage.py print_initial_password ' + email]
+                         './manage.py print_initial_password ' + shlex.quote(email)]
         else:
             # Support users who don't have vagrant based setup
             arguments = ['./manage.py', 'print_initial_password', email]
@@ -65,11 +66,11 @@ for zuliprc_path in zuliprc_paths_list:
                 with open(zuliprc_path, 'w+') as w:
                     zuliprc.write(w)
                 result = 'SUCCESS'
-                reason = 'API field updated for user %s' % (email,)
+                reason = f'API field updated for user {email}'
             except OSError:
                 result = 'FAILURE'
                 reason = 'Writing to file unsuccessful'
         else:
             result = 'SUCCESS'
-            reason = 'API key for user %s is already consistent' % (email,)
-    print('{}: {}: {}'.format(zuliprc_path, result, reason))
+            reason = f'API key for user {email} is already consistent'
+    print(f'{zuliprc_path}: {result}: {reason}')

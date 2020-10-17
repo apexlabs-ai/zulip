@@ -10,10 +10,8 @@
 #
 # All configuration values have a default; values that are commented out
 # serve to show the default.
-
 import os
 import sys
-
 from typing import Any, Dict, List, Optional
 
 # If extensions (or modules to document with autodoc) are in another directory,
@@ -32,8 +30,8 @@ from version import ZULIP_VERSION
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
-extensions = [
-]  # type: List[str]
+extensions: List[str] = [
+]
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -46,7 +44,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'Zulip'
-copyright = '2015-2018, The Zulip Team'
+copyright = '2015–2020, The Zulip Team'
 author = 'The Zulip Team'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -63,7 +61,7 @@ release = ZULIP_VERSION
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None  # type: Optional[str]
+language: Optional[str] = None
 
 # There are two options for replacing |today|: either, you set today to some
 # non-false value, then it is used:
@@ -217,7 +215,7 @@ htmlhelp_basename = 'zulip-contributor-docsdoc'
 
 # -- Options for LaTeX output ---------------------------------------------
 
-latex_elements = {
+latex_elements: Dict[str, str] = {
     # The paper size ('letterpaper' or 'a4paper').
     #'papersize': 'letterpaper',
 
@@ -229,7 +227,7 @@ latex_elements = {
 
     # Latex figure (float) alignment
     #'figure_align': 'htbp',
-}  # type: Dict[str, str]
+}
 
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title,
@@ -266,7 +264,7 @@ latex_documents = [
 # (source start file, name, description, authors, manual section).
 man_pages = [
     (master_doc, 'zulip-contributor-docs', 'Zulip Documentation',
-     [author], 1)
+     [author], 1),
 ]
 
 # If true, show URL addresses after external links.
@@ -308,10 +306,12 @@ source_suffix = {
 
 # Temporary workaround to remove multiple build warnings caused by upstream bug.
 # See https://github.com/zulip/zulip/issues/13263 for details.
+from commonmark.node import Node
 from recommonmark.parser import CommonMarkParser
 
+
 class CustomCommonMarkParser(CommonMarkParser):
-    def visit_document(self, node):
+    def visit_document(self, node: Node) -> None:
         pass
 
 def setup(app: Any) -> None:
@@ -334,4 +334,4 @@ def setup(app: Any) -> None:
     app.add_transform(AutoStructify)
 
     # overrides for wide tables in RTD theme
-    app.add_stylesheet('theme_overrides.css')  # path relative to _static
+    app.add_css_file('theme_overrides.css')  # path relative to _static

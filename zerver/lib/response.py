@@ -1,9 +1,11 @@
+from typing import Any, List, Mapping, Optional
+
+import orjson
 from django.http import HttpResponse, HttpResponseNotAllowed
 from django.utils.translation import ugettext as _
-import ujson
 
-from typing import Optional, Any, Dict, List
 from zerver.lib.exceptions import JsonableError
+
 
 class HttpResponseUnauthorized(HttpResponse):
     status_code = 401
@@ -11,9 +13,9 @@ class HttpResponseUnauthorized(HttpResponse):
     def __init__(self, realm: str, www_authenticate: Optional[str]=None) -> None:
         HttpResponse.__init__(self)
         if www_authenticate is None:
-            self["WWW-Authenticate"] = 'Basic realm="%s"' % (realm,)
+            self["WWW-Authenticate"] = f'Basic realm="{realm}"'
         elif www_authenticate == "session":
-            self["WWW-Authenticate"] = 'Session realm="%s"' % (realm,)
+            self["WWW-Authenticate"] = f'Session realm="{realm}"'
         else:
             raise AssertionError("Invalid www_authenticate value!")
 
@@ -22,28 +24,38 @@ def json_unauthorized(message: Optional[str]=None,
     if message is None:
         message = _("Not logged in: API authentication or user session required")
     resp = HttpResponseUnauthorized("zulip", www_authenticate=www_authenticate)
-    resp.content = (ujson.dumps({"result": "error",
-                                 "msg": message}) + "\n").encode()
+    resp.content = orjson.dumps(
+        {"result": "error", "msg": message}, option=orjson.OPT_APPEND_NEWLINE,
+    )
     return resp
 
 def json_method_not_allowed(methods: List[str]) -> HttpResponseNotAllowed:
     resp = HttpResponseNotAllowed(methods)
-    resp.content = ujson.dumps({"result": "error",
-                                "msg": "Method Not Allowed",
-                                "allowed_methods": methods}).encode()
+    resp.content = orjson.dumps({"result": "error",
+                                 "msg": "Method Not Allowed",
+                                 "allowed_methods": methods})
     return resp
 
 def json_response(res_type: str="success",
                   msg: str="",
-                  data: Optional[Dict[str, Any]]=None,
+                  data: Mapping[str, Any]={},
                   status: int=200) -> HttpResponse:
     content = {"result": res_type, "msg": msg}
-    if data is not None:
-        content.update(data)
-    return HttpResponse(content=ujson.dumps(content) + "\n",
-                        content_type='application/json', status=status)
+    content.update(data)
 
-def json_success(data: Optional[Dict[str, Any]]=None) -> HttpResponse:
+    # Because we don't pass a default handler, OPT_PASSTHROUGH_DATETIME
+    # actually causes orjson to raise a TypeError on datetime objects. This
+    # helps us avoid relying on the particular serialization used by orjson.
+    return HttpResponse(
+        content=orjson.dumps(
+            content,
+            option=orjson.OPT_APPEND_NEWLINE | orjson.OPT_PASSTHROUGH_DATETIME,
+        ),
+        content_type='application/json',
+        status=status,
+    )
+
+def json_success(data: Mapping[str, Any]={}) -> HttpResponse:
     return json_response(data=data)
 
 def json_response_from_error(exception: JsonableError) -> HttpResponse:
@@ -59,5 +71,5 @@ def json_response_from_error(exception: JsonableError) -> HttpResponse:
                          data=exception.data,
                          status=exception.http_status_code)
 
-def json_error(msg: str, data: Optional[Dict[str, Any]]=None, status: int=400) -> HttpResponse:
+def json_error(msg: str, data: Mapping[str, Any]={}, status: int=400) -> HttpResponse:
     return json_response(res_type="error", msg=msg, data=data, status=status)

@@ -1,16 +1,16 @@
-# Production Installation
+# Production installation
 
 You'll need an Ubuntu or Debian system that satisfies
 [the installation requirements](../production/requirements.md). Alternatively,
 you can use a preconfigured
-[Digital Ocean droplet](https://marketplace.digitalocean.com/apps/zulip), or
+[DigitalOcean droplet](https://marketplace.digitalocean.com/apps/zulip), or
 Zulip's
 [experimental Docker image](../production/deployment.html#zulip-in-docker).
 
 Note that if you're developing for Zulip, you should install Zulip's
 [development environment](../development/overview.md) instead. If
 you're just looking to play around with Zulip and see what it looks like,
-you can create a test organization at <https://zulipchat.com/new>.
+you can create a test organization at <https://zulip.com/new>.
 
 ## Step 1: Download the latest release
 
@@ -78,8 +78,8 @@ backup][zulip-backups] or importing your data from [HipChat][hipchat-import],
 [Slack][slack-import], or another Zulip server, you should stop here
 and return to the import instructions.
 
-[hipchat-import]: https://zulipchat.com/help/import-from-hipchat
-[slack-import]: https://zulipchat.com/help/import-from-slack
+[hipchat-import]: https://zulip.com/help/import-from-hipchat
+[slack-import]: https://zulip.com/help/import-from-slack
 [zulip-backups]: ../production/export-and-import.html#backups
 
 Otherwise, open the link in a browser.  Follow the prompts to set up
@@ -114,7 +114,7 @@ important announcements, including new releases and security issues. You can als
 and [upgrading](../production/upgrade-or-modify.md) a production Zulip
 server.
 
-[realm-admin-docs]: https://zulipchat.com/help/getting-your-organization-started-with-zulip
+[realm-admin-docs]: https://zulip.com/help/getting-your-organization-started-with-zulip
 
 ```eval_rst
 .. _installer-details:

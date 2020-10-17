@@ -3,7 +3,7 @@ from typing import Any, Dict
 
 from django.http import HttpRequest, HttpResponse
 
-from zerver.decorator import api_key_only_webhook_view
+from zerver.decorator import webhook_view
 from zerver.lib.request import REQ, has_request_variables
 from zerver.lib.response import json_success
 from zerver.lib.webhooks.common import check_send_webhook_message
@@ -16,7 +16,7 @@ Build update (see [build log]({build_log_url})):
 * **Status**: {status} {emoji}
 """.strip()
 
-@api_key_only_webhook_view('SolanoLabs')
+@webhook_view('SolanoLabs')
 @has_request_variables
 def api_solano_webhook(request: HttpRequest, user_profile: UserProfile,
                        payload: Dict[str, Any]=REQ(argument_type='body')) -> HttpResponse:
@@ -48,16 +48,16 @@ def api_solano_webhook(request: HttpRequest, user_profile: UserProfile,
     # commit itself.
     commit_url = repository.split('@')[1]
     if 'github' in repository:
-        commit_url += '/commit/{}'.format(commit_id)
+        commit_url += f'/commit/{commit_id}'
     elif 'bitbucket' in repository:
-        commit_url += '/commits/{}'.format(commit_id)
+        commit_url += f'/commits/{commit_id}'
     elif 'gitlab' in repository:
-        commit_url += '/pipelines/{}'.format(commit_id)
+        commit_url += f'/pipelines/{commit_id}'
 
     body = MESSAGE_TEMPLATE.format(
         author=author, build_log_url=build_log,
         commit_id=commit_id[:7], commit_url=commit_url,
-        status=status, emoji=emoji
+        status=status, emoji=emoji,
     )
 
     check_send_webhook_message(request, user_profile, topic, body)

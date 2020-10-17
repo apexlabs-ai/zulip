@@ -16,20 +16,17 @@ class Command(ZulipBaseCommand):
     def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument('emails',
                             metavar='<emails>',
-                            type=str,
                             nargs='*',
                             help='email address to spelunk')
         parser.add_argument('--all',
                             action='store_true',
-                            dest='all',
-                            default=False,
                             help='fix all users in specified realm')
         self.add_realm_args(parser)
 
     def fix_all_users(self, realm: Realm) -> None:
         user_profiles = list(UserProfile.objects.filter(
             realm=realm,
-            is_bot=False
+            is_bot=False,
         ))
         for user_profile in user_profiles:
             fix(user_profile)
@@ -41,7 +38,7 @@ class Command(ZulipBaseCommand):
             try:
                 user_profile = self.get_user(email, realm)
             except CommandError:
-                print("e-mail %s doesn't exist in the realm %s, skipping" % (email, realm))
+                print(f"e-mail {email} doesn't exist in the realm {realm}, skipping")
                 return
 
             fix(user_profile)

@@ -13,7 +13,7 @@ the command."""
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         self.add_realm_args(parser, True, "realm in which to create the stream")
-        parser.add_argument('stream_name', metavar='<stream name>', type=str,
+        parser.add_argument('stream_name', metavar='<stream name>',
                             help='name of stream to create')
 
     def handle(self, *args: Any, **options: str) -> None:
@@ -21,4 +21,4 @@ the command."""
         assert realm is not None  # Should be ensured by parser
 
         stream_name = options['stream_name']
-        create_stream_if_needed(realm, stream_name)
+        create_stream_if_needed(realm, stream_name, acting_user=None)

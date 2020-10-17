@@ -1,12 +1,8 @@
-from typing import Dict, List, Optional, Set
-
 import re
 from collections import defaultdict
+from typing import Dict, List, Optional, Sequence, Set
 
-from .template_parser import (
-    tokenize,
-    Token,
-)
+from .template_parser import FormattedException, Token, tokenize
 
 
 class HtmlBranchesException(Exception):
@@ -26,7 +22,7 @@ class HtmlTreeBranch:
         self.fn = fn
         self.line = tags[-1].token.line
 
-        self.words = set()  # type: Set[str]
+        self.words: Set[str] = set()
         for tag in tags:
             for word in tag.words:
                 self.words.add(word)
@@ -57,11 +53,11 @@ class HtmlTreeBranch:
 
 
 class Node:
-    def __init__(self, token: Token, parent: "Optional[Node]") -> None:
+    def __init__(self, token: Optional[Token], parent: "Optional[Node]") -> None:
         # FIXME parent parameter is not used!
         self.token = token
-        self.children = []  # type: List[Node]
-        self.parent = None  # type: Optional[Node]
+        self.children: List[Node] = []
+        self.parent: Optional[Node] = None
 
 
 class TagInfo:
@@ -70,10 +66,11 @@ class TagInfo:
         self.classes = classes
         self.ids = ids
         self.token = token
-        self.words = \
-            [self.tag] + \
-            ['.' + s for s in classes] + \
-            ['#' + s for s in ids]
+        self.words = [
+            self.tag,
+            *('.' + s for s in classes),
+            *('#' + s for s in ids),
+        ]
 
     def text(self) -> str:
         s = self.tag
@@ -87,8 +84,8 @@ class TagInfo:
 def get_tag_info(token: Token) -> TagInfo:
     s = token.s
     tag = token.tag
-    classes = []  # type: List[str]
-    ids = []  # type: List[str]
+    classes: List[str] = []
+    ids: List[str] = []
 
     searches = [
         (classes, ' class="(.*?)"'),
@@ -111,7 +108,7 @@ def split_for_id_and_class(element: str) -> List[str]:
     # attributes from HTML tags. This also takes care of template variables
     # in string during splitting process. For eg. 'red black {{ a|b|c }}'
     # is split as ['red', 'black', '{{ a|b|c }}']
-    outside_braces = True  # type: bool
+    outside_braces: bool = True
     lst = []
     s = ''
 
@@ -133,15 +130,13 @@ def split_for_id_and_class(element: str) -> List[str]:
 
 
 def html_branches(text: str, fn: Optional[str] = None) -> List[HtmlTreeBranch]:
-    tree = html_tag_tree(text)
-    branches = []  # type: List[HtmlTreeBranch]
+    tree = html_tag_tree(text, fn)
+    branches: List[HtmlTreeBranch] = []
 
-    def walk(node: Node, tag_info_list: Optional[List[TagInfo]] = None) -> None:
+    def walk(node: Node, tag_info_list: Sequence[TagInfo] = []) -> None:
+        assert node.token is not None
         info = get_tag_info(node.token)
-        if tag_info_list is None:
-            tag_info_list = [info]
-        else:
-            tag_info_list = tag_info_list[:] + [info]
+        tag_info_list = [*tag_info_list, info]
 
         if node.children:
             for child in node.children:
@@ -151,12 +146,12 @@ def html_branches(text: str, fn: Optional[str] = None) -> List[HtmlTreeBranch]:
             branches.append(tree_branch)
 
     for node in tree.children:
-        walk(node, None)
+        walk(node, [])
 
     return branches
 
 
-def html_tag_tree(text: str) -> Node:
+def html_tag_tree(text: str, fn: Optional[str]=None) -> Node:
     tokens = tokenize(text)
     top_level = Node(token=None, parent=None)
     stack = [top_level]
@@ -179,12 +174,18 @@ def html_tag_tree(text: str) -> Node:
 
 
 def build_id_dict(templates: List[str]) -> (Dict[str, List[str]]):
-    template_id_dict = defaultdict(list)  # type: (Dict[str, List[str]])
+    template_id_dict: (Dict[str, List[str]]) = defaultdict(list)
 
     for fn in templates:
         with open(fn) as f:
             text = f.read()
-        list_tags = tokenize(text)
+
+        try:
+            list_tags = tokenize(text)
+        except FormattedException as e:
+            raise Exception(f'''
+                fn: {fn}
+                {e}''')
 
         for tag in list_tags:
             info = get_tag_info(tag)

@@ -65,13 +65,13 @@ number of purposes:
    * Handling the [local echo details](#local-echo).
    * Handling certain client configuration options that affect
      messages.  E.g. determining whether to send the
-     plaintext/markdown raw content or the rendered HTML (e.g. the
+     plaintext/Markdown raw content or the rendered HTML (e.g. the
      `apply_markdown` and `client_gravatar` features in our
-     [events API docs](https://zulipchat.com/api/register-queue)).
+     [events API docs](https://zulip.com/api/register-queue)).
 * Following our standard naming convention, input validation is done
   inside the `check_message` function, which is responsible for
   validating the user can send to the recipient,
-  [rendering the markdown](../subsystems/markdown.md), etc. --
+  [rendering the Markdown](../subsystems/markdown.md), etc. --
   basically everything that can fail due to bad user input.
 * The core `do_send_messages` function (which handles actually sending
   the message) is one of the most optimized and thus complex parts of
@@ -92,7 +92,7 @@ number of purposes:
      step adds a lot of complexity, because the events system cannot
      make queries to the database directly.
    * Trigger any other deferred work caused by the current message,
-     e.g. [outgoing webhooks](https://zulipchat.com/api/outgoing-webhooks)
+     e.g. [outgoing webhooks](https://zulip.com/api/outgoing-webhooks)
      or embedded bots.
    * Every query is designed to be a bulk query; we carefully
      unit-test this system for how many database and memcached queries
@@ -113,10 +113,10 @@ browser, and then replace it with data from the server when it
 changes.
 
 Zulip aims for a near-perfect local echo experience, which requires is
-why our [markdown system](../subsystems/markdown.md) requires both
-an authoritative (backend) markdown implementation and a secondary
-(frontend) markdown implementation, the latter used only for the local
-echo feature.  Read our markdown documentation for all the tricky
+why our [Markdown system](../subsystems/markdown.md) requires both
+an authoritative (backend) Markdown implementation and a secondary
+(frontend) Markdown implementation, the latter used only for the local
+echo feature.  Read our Markdown documentation for all the tricky
 details on how that works and is tested.
 
 The rest of this section details how Zulip manages locally echoed
@@ -136,7 +136,7 @@ messages.
   duplicated by a real confirmed-by-the-backend message ID.  We choose
   just above the `max_message_id`, because we want any new messages
   that other users send to the current view to be placed after it in
-  the feed (this decision is someone arbitrary; in any case we'll
+  the feed (this decision is somewhat arbitrary; in any case we'll
   resort it to its proper place once it is confirmed by the server.
   We do it this way to minimize messages jumping around/reordering
   visually).
@@ -193,7 +193,7 @@ one place:
   receive the message (including the sender).  As a side effect, it
   adds queue items to the email and push notification queues (which,
   in turn, may trigger those notifications).
-  * Other receive the event and display the new message.
+  * Other clients receive the event and display the new message.
   * For the client that sent the message, it instead replaces its
     locally echoed message with the final message it received back
     from the server (it indicates this to the sender by adding a
@@ -231,13 +231,13 @@ from the target URL, and for slow websites, this could result in a
 significant delay in rendering the message and delivering it to other
 users.
 
-* For this case, Zulip's backend markdown processor will render the
+* For this case, Zulip's backend Markdown processor will render the
 message without including the URL embeds/previews, but it will add a
 deferred work item into the `embed_links` queue.
 
 * The [queue processor](../subsystems/queuing.md) for the
 `embed_links` queue will fetch the URLs, and then if they return
-results, rerun the markdown processor and notify clients of the
+results, rerun the Markdown processor and notify clients of the
 updated message `rendered_content`.
 
 * We reuse the `update_message` framework (used for
@@ -284,7 +284,7 @@ of about 1 second per 2000 users subscribed to receive the message.
 While these delays may not be immediately obvious to users (Zulip,
 like many other chat applications,
 [local echoes](../subsystems/markdown.md) messages that a user sends
-as soon as the user hits “send”), latency beyond a second or two
+as soon as the user hits “Send”), latency beyond a second or two
 significantly impacts the feeling of interactivity in a chat
 experience (i.e. it feels like everyone takes a long time to reply to
 even simple questions).
@@ -337,7 +337,7 @@ those rows later because we already have the data for when the user
 might have been subscribed or unsubscribed from streams by other
 users, and, importantly, we also know that the user didn’t interact
 with the UI since the message was sent (and thus we can safely assume
-that the messages has not been marked a read by the user).  This is
+that the messages have not been marked as read by the user).  This is
 done in the `add_missing_messages` function, which is the core of the
 soft-deactivation implementation.
 

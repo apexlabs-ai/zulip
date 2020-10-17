@@ -3,8 +3,6 @@
 
 {% block customhead %}
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<!-- Bootstrap 2.3.2-->
-<script src="https://stackpath.bootstrapcdn.com/twitter-bootstrap/2.3.2/js/bootstrap.min.js" defer></script>
 
 <style>
     .portico-page {
@@ -171,13 +169,13 @@
                     Zulip has modern apps for every major platform,
                     powered by Electron and React Native.
                 </p>
-                <br />
+                <br>
             </div>
 
             <div class="platform-icons">
                 <div class="group">
                     <h2>Web</h2>
-                    <a href="{{ apps_page_url }}">
+                    <a href="{{ apps_page_web }}">
                         <i class="fa fa-desktop platform-icon" aria-hidden="true"></i>
                     </a>
                 </div>
@@ -503,7 +501,7 @@
                 </div>
             </div>
 
-            <hr />
+            <hr>
 
             <div class="company-container">
                 <header>
@@ -528,17 +526,17 @@
     <div class="padded-content call-to-action-bottom">
         <h1>Experience Zulip today!</h1>
         {% if root_domain_landing_page %}
-        <a href="{{ url('plans') }}" class="download-button button">
+        <a href="{{ url('plans') }}" class="download-button button green">
             {{ _('See plans and pricing') }}
         </a>
         {% endif %}
         {% if register_link_disabled %}
         {% elif only_sso %}
-        <a href="{{ url('login-sso') }}" class="button">
+        <a href="{{ url('login-sso') }}" class="button green">
             {{ _('Log in now') }}
         </a>
         {% else %}
-        <a href="{{ url('register') }}" class="button">
+        <a href="{{ url('register') }}" class="button green">
             {{ _('Sign up now') }}
         </a>
         {% endif %}

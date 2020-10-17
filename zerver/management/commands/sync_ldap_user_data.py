@@ -26,8 +26,8 @@ def sync_ldap_user_data(user_profiles: List[UserProfile], deactivation_protectio
             try:
                 sync_user_from_ldap(u, logger)
             except ZulipLDAPException as e:
-                logger.error("Error attempting to update user %s:" % (u.delivery_email,))
-                logger.error(e)
+                logger.error("Error attempting to update user %s:", u.delivery_email)
+                logger.error(e.args[0])
 
         if deactivation_protection:
             if not UserProfile.objects.filter(is_bot=False, is_active=True).exists():
@@ -53,9 +53,7 @@ def sync_ldap_user_data(user_profiles: List[UserProfile], deactivation_protectio
 class Command(ZulipBaseCommand):
     def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument('-f', '--force',
-                            dest='force',
                             action="store_true",
-                            default=False,
                             help='Disable the protection against deactivating all users.')
 
         self.add_realm_args(parser)

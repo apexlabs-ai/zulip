@@ -1,9 +1,8 @@
+import json
 import os
 import re
-import time
 import subprocess
-import json
-
+import time
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List
 
@@ -22,7 +21,6 @@ normal_queues = [
     'missedmessage_mobile_notifications',
     'outgoing_webhooks',
     'signups',
-    'slow_queries',
     'user_activity',
     'user_activity_interval',
     'user_presence',
@@ -37,31 +35,21 @@ states = {
     0: "OK",
     1: "WARNING",
     2: "CRITICAL",
-    3: "UNKNOWN"
+    3: "UNKNOWN",
 }
 
-MAX_SECONDS_TO_CLEAR_FOR_BURSTS = defaultdict(
-    lambda: 120,
-    digest_emails=600,
-    slow_queries=600,
-)  # type: DefaultDict[str, int]
-MAX_SECONDS_TO_CLEAR_NORMAL = defaultdict(
+MAX_SECONDS_TO_CLEAR: DefaultDict[str, int] = defaultdict(
     lambda: 30,
     digest_emails=1200,
-    slow_queries=120,
     missedmessage_mobile_notifications=120,
-)  # type: DefaultDict[str, int]
-CRITICAL_SECONDS_TO_CLEAR_FOR_BURSTS = defaultdict(
-    lambda: 240,
-    digest_emails=1200,
-    slow_queries=1200,
-)  # type: DefaultDict[str, int]
-CRITICAL_SECONDS_TO_CLEAR_NORMAL = defaultdict(
+    embed_links=60,
+)
+CRITICAL_SECONDS_TO_CLEAR: DefaultDict[str, int] = defaultdict(
     lambda: 60,
     missedmessage_mobile_notifications=180,
-    digest_emails=600,
-    slow_queries=600,
-)  # type: DefaultDict[str, int]
+    digest_emails=1800,
+    embed_links=90,
+)
 
 def analyze_queue_stats(queue_name: str, stats: Dict[str, Any],
                         queue_count_rabbitmqctl: int) -> Dict[str, Any]:
@@ -75,16 +63,22 @@ def analyze_queue_stats(queue_name: str, stats: Dict[str, Any],
         # Queue isn't updating the stats file and has some events in
         # the backlog, it's likely stuck.
         #
-        # TODO: There's an unfortunate race where if the queue has
-        # been empty for the last hour (because there haven't been 50
-        # new events in the last hour), and then gets a burst, this
-        # condition will be true for the first (event_handling_time *
-        # 50).
+        # TODO: There's an unlikely race condition here - if the queue
+        # was fully emptied and was idle due to no new events coming
+        # for over 180 seconds, suddenly gets a burst of events and
+        # this code runs exactly in the very small time window between
+        # those events popping up and the queue beginning to process
+        # the first one (which will refresh the stats file at the very
+        # start), we'll incorrectly return the CRITICAL status. The
+        # chance of that happening should be negligible because the queue
+        # worker should wake up immediately and log statistics before
+        # starting to process the first event.
         return dict(status=CRITICAL,
                     name=queue_name,
-                    message='queue appears to be stuck, last update %s' % (stats['update_time'],))
+                    message='queue appears to be stuck, last update {}, queue size {}'.format(
+                        stats['update_time'], queue_count_rabbitmqctl))
 
-    current_size = stats['current_queue_size']
+    current_size = queue_count_rabbitmqctl
     average_consume_time = stats['recent_average_consume_time']
     if average_consume_time is None:
         # Queue just started; we can't effectively estimate anything.
@@ -96,36 +90,15 @@ def analyze_queue_stats(queue_name: str, stats: Dict[str, Any],
                     message='')
 
     expected_time_to_clear_backlog = current_size * average_consume_time
-    time_since_emptied = now - stats['queue_last_emptied_timestamp']
-    if time_since_emptied > max(300, CRITICAL_SECONDS_TO_CLEAR_FOR_BURSTS[queue_name]):
-        # We need the max() expression in case the rules for the queue
-        # permit longer processing times than 300s - to prevent
-        # incorrectly throwing an error by changing the classification
-        # of the the backlog from "burst" to "not burst" after 300s,
-        # while the worker is still processing it and staying below
-        # the CRITICAL threshold.
-        if expected_time_to_clear_backlog > MAX_SECONDS_TO_CLEAR_NORMAL[queue_name]:
-            if expected_time_to_clear_backlog > CRITICAL_SECONDS_TO_CLEAR_NORMAL[queue_name]:
-                status = CRITICAL
-            else:
-                status = WARNING
+    if expected_time_to_clear_backlog > MAX_SECONDS_TO_CLEAR[queue_name]:
+        if expected_time_to_clear_backlog > CRITICAL_SECONDS_TO_CLEAR[queue_name]:
+            status = CRITICAL
+        else:
+            status = WARNING
 
-            return dict(status=status,
-                        name=queue_name,
-                        message='clearing the backlog will take too long: %ss, size: %s' % (
-                            expected_time_to_clear_backlog, current_size))
-    else:
-        # We slept recently, so treat this as a burst.
-        if expected_time_to_clear_backlog > MAX_SECONDS_TO_CLEAR_FOR_BURSTS[queue_name]:
-            if expected_time_to_clear_backlog > CRITICAL_SECONDS_TO_CLEAR_FOR_BURSTS[queue_name]:
-                status = CRITICAL
-            else:
-                status = WARNING
-
-            return dict(status=status,
-                        name=queue_name,
-                        message='clearing the burst will take too long: %ss, size: %s' % (
-                            expected_time_to_clear_backlog, current_size))
+        return dict(status=status,
+                    name=queue_name,
+                    message=f'clearing the backlog will take too long: {expected_time_to_clear_backlog}s, size: {current_size}')
 
     return dict(status=OK,
                 name=queue_name,
@@ -143,47 +116,40 @@ def check_other_queues(queue_counts_dict: Dict[str, int]) -> List[Dict[str, Any]
 
         if count > CRITICAL_COUNT_THRESHOLD_DEFAULT:
             results.append(dict(status=CRITICAL, name=queue,
-                                message='count critical: %s' % (count,)))
+                                message=f'count critical: {count}'))
         elif count > WARN_COUNT_THRESHOLD_DEFAULT:
             results.append(dict(status=WARNING, name=queue,
-                                message='count warning: %s' % (count,)))
+                                message=f'count warning: {count}'))
         else:
             results.append(dict(status=OK, name=queue, message=''))
 
     return results
 
 def check_rabbitmq_queues() -> None:
-    pattern = re.compile(r'(\w+)\t(\d+)')
+    pattern = re.compile(r'(\w+)\t(\d+)\t(\d+)')
     if 'USER' in os.environ and not os.environ['USER'] in ['root', 'rabbitmq']:
         print("This script must be run as the root or rabbitmq user")
 
-    list_queues_output = subprocess.check_output(['/usr/sbin/rabbitmqctl', 'list_queues'],
+    list_queues_output = subprocess.check_output(['/usr/sbin/rabbitmqctl', 'list_queues',
+                                                  'name', 'messages', 'consumers'],
                                                  universal_newlines=True)
-    list_consumers_output = subprocess.check_output(['/usr/sbin/rabbitmqctl', 'list_consumers'],
-                                                    universal_newlines=True)
-
-    queue_counts_rabbitmqctl = dict()
+    queue_counts_rabbitmqctl = {}
+    queues_with_consumers = []
     for line in list_queues_output.split("\n"):
         line = line.strip()
         m = pattern.match(line)
         if m:
             queue = m.group(1)
             count = int(m.group(2))
+            consumers = int(m.group(3))
             queue_counts_rabbitmqctl[queue] = count
-
-    queues_with_consumers = []
-    for line in list_consumers_output.split('\n'):
-        parts = line.split('\t')
-        if len(parts) >= 2:
-            queue_name = parts[0]
-            if queue_name.startswith("notify_tornado"):
-                continue
-            queues_with_consumers.append(queue_name)
+            if consumers > 0 and not queue.startswith("notify_tornado"):
+                queues_with_consumers.append(queue)
 
     queue_stats_dir = subprocess.check_output([os.path.join(ZULIP_PATH, 'scripts/get-django-setting'),
-                                              'QUEUE_STATS_DIR'],
+                                               'QUEUE_STATS_DIR'],
                                               universal_newlines=True).strip()
-    queue_stats = dict()  # type: Dict[str, Dict[str, Any]]
+    queue_stats: Dict[str, Dict[str, Any]] = {}
     queues_to_check = set(normal_queues).intersection(set(queues_with_consumers))
     for queue in queues_to_check:
         fn = queue + ".stats"
@@ -210,10 +176,10 @@ def check_rabbitmq_queues() -> None:
 
     if status > 0:
         queue_error_template = "queue {} problem: {}:{}"
-        error_message = '; '.join([
+        error_message = '; '.join(
             queue_error_template.format(result['name'], states[result['status']], result['message'])
             for result in results if result['status'] > 0
-        ])
-        print("%s|%s|%s|%s" % (now, status, states[status], error_message))
+        )
+        print(f"{now}|{status}|{states[status]}|{error_message}")
     else:
-        print("%s|%s|%s|queues normal" % (now, status, states[status]))
+        print(f"{now}|{status}|{states[status]}|queues normal")

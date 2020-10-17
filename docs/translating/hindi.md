@@ -16,7 +16,7 @@ Use informal Hindi for translation:
 
 * Balance common verbs and nouns with specific IT-related translations
   of English terms - this can be tricky, try to check how other
-  resources were translated (e.g. GMail, Microsoft websites, Facebook)
+  resources were translated (e.g. Gmail, Microsoft websites, Facebook)
   to decide what wouldn't sound awkward / rude in Hindi.
 
 Some terms are very tricky to translate, so be sure to communicate
@@ -26,9 +26,6 @@ Zulip friendly and usable.
 ## Terms(शर्तें)
 * Message - **संदेश**
 * Private message (PM) - **निजी संदेश**
-* Realm - **क्षेत्र**: the literal Hindi of realm is "राज्य",
-  which is not a term that's charged with computer
-  terminology. "क्षेत्र" is much clearer.
 * Stream - **धारा**: the use of the literal Hindi word for stream
   "प्रवाह" is very confusing and not the correct metaphor for Hindi
   speaking people. The correct term would be "धारा".

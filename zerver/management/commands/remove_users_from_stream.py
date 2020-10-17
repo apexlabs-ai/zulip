@@ -12,9 +12,7 @@ class Command(ZulipBaseCommand):
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument('-s', '--stream',
-                            dest='stream',
                             required=True,
-                            type=str,
                             help='A stream name.')
 
         self.add_realm_args(parser, True)
@@ -27,12 +25,12 @@ class Command(ZulipBaseCommand):
         stream_name = options["stream"].strip()
         stream = get_stream(stream_name, realm)
 
-        result = bulk_remove_subscriptions(user_profiles, [stream], self.get_client())
+        result = bulk_remove_subscriptions(user_profiles, [stream], self.get_client(), acting_user=None)
         not_subscribed = result[1]
         not_subscribed_users = {tup[0] for tup in not_subscribed}
 
         for user_profile in user_profiles:
             if user_profile in not_subscribed_users:
-                print("%s was not subscribed" % (user_profile.delivery_email,))
+                print(f"{user_profile.delivery_email} was not subscribed")
             else:
-                print("Removed %s from %s" % (user_profile.delivery_email, stream_name))
+                print(f"Removed {user_profile.delivery_email} from {stream_name}")

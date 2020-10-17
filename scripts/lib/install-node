@@ -3,12 +3,9 @@ set -eo pipefail
 
 ZULIP_PATH="$(dirname "$0")/../.."
 ZULIP_SRV="/srv"
-if [ "$TRAVIS" ] ; then
-    ZULIP_SRV="/home/travis"
-fi
 YARN_PACKAGE_JSON="$ZULIP_SRV/zulip-yarn/package.json"
-node_version=12.16.1
-yarn_version=1.22.4
+node_version=12.18.4
+yarn_version=1.22.5
 nvm_version=0.35.3
 
 # This is a fix for the fact that nvm uses $HOME to determine which
@@ -34,7 +31,10 @@ fi
 if [ "$current_node_version" != "v$node_version" ] || ! [ -L "$node_wrapper_path" ]; then
     export NVM_DIR=/usr/local/nvm
     # shellcheck source=/dev/null
-    if ! [ -e "$NVM_DIR/nvm.sh" ] || { . "$NVM_DIR/nvm.sh"; [ "$(nvm --version)" != "$nvm_version" ]; }; then
+    if ! [ -e "$NVM_DIR/nvm.sh" ] || {
+        . "$NVM_DIR/nvm.sh"
+        [ "$(nvm --version)" != "$nvm_version" ]
+    }; then
         mkdir -p "$NVM_DIR"
         wget_opts=(-nv)
         if [ -n "${CUSTOM_CA_CERTIFICATES:-}" ]; then

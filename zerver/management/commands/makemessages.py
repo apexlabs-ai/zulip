@@ -1,4 +1,7 @@
 """
+See https://zulip.readthedocs.io/en/latest/translating/internationalization.html
+for background.
+
 The contents of this file are taken from
 https://github.com/niwinz/django-jinja/blob/master/django_jinja/management/commands/makemessages.py
 
@@ -29,25 +32,26 @@ https://stackoverflow.com/questions/2090717
 
 """
 import glob
+import itertools
 import json
 import os
 import re
 from argparse import ArgumentParser
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any, Dict, Iterable, Iterator, List, Mapping
 
-from django.conf import settings
 from django.core.management.commands import makemessages
 from django.template.base import BLOCK_TAG_END, BLOCK_TAG_START
 from django.utils.translation import template
 
-strip_whitespace_right = re.compile("(%s-?\\s*(trans|pluralize).*?-%s)\\s+" % (
-                                    BLOCK_TAG_START, BLOCK_TAG_END), re.U)
-strip_whitespace_left = re.compile("\\s+(%s-\\s*(endtrans|pluralize).*?-?%s)" % (
-                                   BLOCK_TAG_START, BLOCK_TAG_END), re.U)
+strip_whitespace_right = re.compile(f"({BLOCK_TAG_START}-?\\s*(trans|pluralize).*?-{BLOCK_TAG_END})\\s+", re.U)
+strip_whitespace_left = re.compile(f"\\s+({BLOCK_TAG_START}-\\s*(endtrans|pluralize).*?-?{BLOCK_TAG_END})", re.U)
 
 regexes = [r'{{#tr .*?}}([\s\S]*?){{/tr}}',  # '.' doesn't match '\n' by default
            r'{{\s*t "(.*?)"\W*}}',
            r"{{\s*t '(.*?)'\W*}}",
+           r'\(t "(.*?)"\)',
+           r'=\(t "(.*?)"\)(?=[^{]*}})',
+           r"=\(t '(.*?)'\)(?=[^{]*}})",
            r"i18n\.t\('([^']*?)'\)",
            r"i18n\.t\('(.*?)',\s*.*?[^,]\)",
            r'i18n\.t\("([^"]*?)"\)',
@@ -69,17 +73,17 @@ class Command(makemessages.Command):
 
     xgettext_options = makemessages.Command.xgettext_options
     for func, tag in tags:
-        xgettext_options += ['--keyword={}:1,"{}"'.format(func, tag)]
+        xgettext_options += [f'--keyword={func}:1,"{tag}"']
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         super().add_arguments(parser)
-        parser.add_argument('--frontend-source', type=str,
+        parser.add_argument('--frontend-source',
                             default='static/templates',
                             help='Name of the Handlebars template directory')
-        parser.add_argument('--frontend-output', type=str,
+        parser.add_argument('--frontend-output',
                             default='locale',
                             help='Name of the frontend messages output directory')
-        parser.add_argument('--frontend-namespace', type=str,
+        parser.add_argument('--frontend-namespace',
                             default='translations.json',
                             help='Namespace of the frontend locale file')
 
@@ -140,7 +144,7 @@ class Command(makemessages.Command):
             template.constant_re = old_constant_re
 
     def extract_strings(self, data: str) -> List[str]:
-        translation_strings = []  # type: List[str]
+        translation_strings: List[str] = []
         for regex in frontend_compiled_regexes:
             for match in regex.findall(data):
                 match = match.strip()
@@ -158,7 +162,7 @@ class Command(makemessages.Command):
         return data
 
     def get_translation_strings(self) -> List[str]:
-        translation_strings = []  # type: List[str]
+        translation_strings: List[str] = []
         dirname = self.get_template_dir()
 
         for dirpath, dirnames, filenames in os.walk(dirname):
@@ -168,11 +172,12 @@ class Command(makemessages.Command):
                 with open(os.path.join(dirpath, filename)) as reader:
                     data = reader.read()
                     translation_strings.extend(self.extract_strings(data))
-
-        dirname = os.path.join(settings.DEPLOY_ROOT, 'static/js')
-        for filename in os.listdir(dirname):
-            if filename.endswith('.js') and not filename.startswith('.'):
-                with open(os.path.join(dirname, filename)) as reader:
+        for dirpath, dirnames, filenames in itertools.chain(os.walk("static/js"),
+                                                            os.walk("static/shared/js")):
+            for filename in [f for f in filenames if f.endswith(".js") or f.endswith(".ts")]:
+                if filename.startswith('.'):
+                    continue
+                with open(os.path.join(dirpath, filename)) as reader:
                     data = reader.read()
                     data = self.ignore_javascript_comments(data)
                     translation_strings.extend(self.extract_strings(data))
@@ -190,7 +195,7 @@ class Command(makemessages.Command):
         exclude = self.frontend_exclude
         process_all = self.frontend_all
 
-        paths = glob.glob('%s/*' % (self.default_locale_path,),)
+        paths = glob.glob(f'{self.default_locale_path}/*')
         all_locales = [os.path.basename(path) for path in paths if os.path.isdir(path)]
 
         # Account for excluded locales
@@ -203,7 +208,7 @@ class Command(makemessages.Command):
     def get_base_path(self) -> str:
         return self.frontend_output
 
-    def get_output_paths(self) -> Iterable[str]:
+    def get_output_paths(self) -> Iterator[str]:
         base_path = self.get_base_path()
         locales = self.get_locales()
         for path in [os.path.join(base_path, locale) for locale in locales]:
@@ -238,7 +243,7 @@ class Command(makemessages.Command):
 
     def write_translation_strings(self, translation_strings: List[str]) -> None:
         for locale, output_path in zip(self.get_locales(), self.get_output_paths()):
-            self.stdout.write("[frontend] processing locale {}".format(locale))
+            self.stdout.write(f"[frontend] processing locale {locale}")
             try:
                 with open(output_path) as reader:
                     old_strings = json.load(reader)

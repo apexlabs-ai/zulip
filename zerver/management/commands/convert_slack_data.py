@@ -3,8 +3,8 @@ import os
 import tempfile
 from typing import Any
 
-from django.core.management.base import BaseCommand, CommandError, \
-    CommandParser
+from django.conf import settings
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from zerver.data_import.slack import do_convert_data
 
@@ -18,16 +18,13 @@ class Command(BaseCommand):
                             help="Zipped slack data")
 
         parser.add_argument('--token', metavar='<slack_token>',
-                            type=str, help='Slack legacy token of the organsation')
+                            help='Slack legacy token of the organsation')
 
         parser.add_argument('--output', dest='output_dir',
-                            action="store", default=None,
                             help='Directory to write exported data to.')
 
         parser.add_argument('--threads',
-                            dest='threads',
-                            action="store",
-                            default=6,
+                            default=settings.DEFAULT_DATA_EXPORT_IMPORT_PARALLELISM,
                             help='Threads to use in exporting UserMessage objects in parallel')
 
         parser.formatter_class = argparse.RawTextHelpFormatter
@@ -49,7 +46,7 @@ class Command(BaseCommand):
 
         for path in options['slack_data_zip']:
             if not os.path.exists(path):
-                raise CommandError("Slack data directory not found: '%s'" % (path,))
+                raise CommandError(f"Slack data directory not found: '{path}'")
 
             print("Converting Data ...")
             do_convert_data(path, output_dir, token, threads=num_threads)

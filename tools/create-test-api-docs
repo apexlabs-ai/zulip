@@ -2,15 +2,16 @@
 
 # check for the venv
 from lib import sanity_check
-sanity_check.check_venv(__file__)
 
-from collections import defaultdict
-from typing import Any, Dict, List, Set
+sanity_check.check_venv(__file__)
 
 import html
 import os
 import pprint
-import ujson
+from collections import defaultdict
+from typing import Any, Dict, List, Set
+
+import orjson
 
 Call = Dict[str, Any]
 
@@ -38,9 +39,9 @@ def encode_info(info: Any) -> str:
     try:
         result = ''
         try:
-            info = ujson.loads(info)
+            info = orjson.loads(info)
             result = '(stringified)\n'
-        except Exception:
+        except orjson.JSONDecodeError:
             pass
         result += html.escape(pprint.pformat(info, indent=4))
         return '<pre>' + result + '</pre>'
@@ -65,19 +66,16 @@ def create_single_page(pattern: str, out_dir: str, href: str, calls: List[Call])
             }
             </style>
             ''')
-        f.write('<h3>%s</h3>\n' % (html.escape(pattern),))
+        f.write(f'<h3>{html.escape(pattern)}</h3>\n')
         calls.sort(key=lambda call: call['status_code'])
         for call in calls:
             f.write('<hr>')
-            f.write('\n%s' % (fix_test_name(call['test_name']),))
+            f.write('\n{}'.format(fix_test_name(call['test_name'])))
             f.write('<div class="test">')
-            try:
-                f.write(call['url'])
-            except Exception:
-                f.write(call['url'].encode('utf8'))
+            f.write(call['url'])
             f.write('<br>\n')
             f.write(call['method'] + '<br>\n')
-            f.write('status code: %s<br>\n' % (call['status_code'],))
+            f.write('status code: {}<br>\n'.format(call['status_code']))
             f.write('<br>')
             f.write('</div>')
 
@@ -105,11 +103,10 @@ def create_user_docs() -> None:
             </style>
             ''')
 
-        calls = []
-        for line in open(fn):
-            calls.append(ujson.loads(line))
+        with open(fn, "rb") as coverage:
+            calls = [orjson.loads(line) for line in coverage]
 
-        pattern_dict = defaultdict(list)  # type: Dict[str, List[Call]]
+        pattern_dict: Dict[str, List[Call]] = defaultdict(list)
         for call in calls:
             if 'pattern' in call:
                 pattern = clean_up_pattern(call['pattern'])
@@ -124,7 +121,7 @@ def create_user_docs() -> None:
             ('json', 'legacy'),
         ]
 
-        groups = dict()  # type: Dict[str, Set[str]]
+        groups: Dict[str, Set[str]] = {}
         for prefix, name in tups:
             groups[name] = {p for p in patterns if p.startswith(prefix)}
             patterns -= groups[name]
@@ -136,13 +133,13 @@ def create_user_docs() -> None:
             f.write('<ul>\n')
             for pattern in sorted(groups[name]):
                 href = pattern.replace('/', '-') + '.html'
-                link = '<a href="%s">%s</a>' % (href, html.escape(pattern))
+                link = f'<a href="{href}">{html.escape(pattern)}</a>'
                 f.write('<li>' + link + '</li>\n')
                 create_single_page(pattern, out_dir, href, pattern_dict[pattern])
             f.write('</ul>')
             f.write('\n')
 
-    print('open %s' % (main_page,))
+    print(f'open {main_page}')
 
 
 if __name__ == '__main__':

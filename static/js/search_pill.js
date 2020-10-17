@@ -1,9 +1,11 @@
+"use strict";
+
 exports.create_item_from_search_string = function (search_string) {
     const operator = Filter.parse(search_string);
     const description = Filter.describe(operator);
     return {
         display_value: search_string,
-        description: description,
+        description,
     };
 };
 
@@ -21,7 +23,11 @@ exports.create_pills = function (pill_container) {
 };
 
 exports.append_search_string = function (search_string, pill_widget) {
-    pill_widget.appendValue(search_string);
+    const operators = Filter.parse(search_string);
+    for (const operator of operators) {
+        const input = Filter.unparse([operator]);
+        pill_widget.appendValue(input);
+    }
     if (pill_widget.clear_text !== undefined) {
         pill_widget.clear_text();
     }
@@ -29,8 +35,8 @@ exports.append_search_string = function (search_string, pill_widget) {
 
 exports.get_search_string_for_current_filter = function (pill_widget) {
     const items = pill_widget.items();
-    const search_strings = items.map(item => item.display_value);
-    return search_strings.join(' ');
+    const search_strings = items.map((item) => item.display_value);
+    return search_strings.join(" ");
 };
 
 window.search_pill = exports;

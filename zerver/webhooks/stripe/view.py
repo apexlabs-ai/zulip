@@ -1,15 +1,15 @@
 # Webhooks for external integrations.
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 from django.http import HttpRequest, HttpResponse
 
-from zerver.decorator import api_key_only_webhook_view
+from zerver.decorator import webhook_view
+from zerver.lib.exceptions import UnsupportedWebhookEventType
 from zerver.lib.request import REQ, has_request_variables
 from zerver.lib.response import json_success
 from zerver.lib.timestamp import timestamp_to_datetime
-from zerver.lib.webhooks.common import UnexpectedWebhookEventType, \
-    check_send_webhook_message
+from zerver.lib.webhooks.common import check_send_webhook_message
 from zerver.models import UserProfile
 
 
@@ -19,7 +19,7 @@ class SuppressedEvent(Exception):
 class NotImplementedEventType(SuppressedEvent):
     pass
 
-@api_key_only_webhook_view('Stripe')
+@webhook_view('Stripe')
 @has_request_variables
 def api_stripe_webhook(request: HttpRequest, user_profile: UserProfile,
                        payload: Dict[str, Any]=REQ(argument_type='body'),
@@ -50,7 +50,7 @@ def topic_and_body(payload: Dict[str, Any]) -> Tuple[str, str]:
         topic = customer_id
     body = None
 
-    def update_string(blacklist: List[str]=[]) -> str:
+    def update_string(blacklist: Sequence[str] = []) -> str:
         assert('previous_attributes' in payload['data'])
         previous_attributes = payload['data']['previous_attributes']
         for attribute in blacklist:
@@ -61,7 +61,7 @@ def topic_and_body(payload: Dict[str, Any]) -> Tuple[str, str]:
                        ' is now ' + stringify(object_[attribute])
                        for attribute in sorted(previous_attributes.keys()))
 
-    def default_body(update_blacklist: List[str]=[]) -> str:
+    def default_body(update_blacklist: Sequence[str] = []) -> str:
         body = '{resource} {verbed}'.format(
             resource=linkified_id(object_['id']), verbed=event.replace('_', ' '))
         if event == 'updated':
@@ -97,11 +97,14 @@ def topic_and_body(payload: Dict[str, Any]) -> Tuple[str, str]:
             topic = 'disputes'
             body = default_body() + '. Current status: {status}.'.format(
                 status=object_['status'].replace('_', ' '))
-        if resource == 'refund':  # nocoverage
+        if resource == 'refund':
             topic = 'refunds'
-            body = 'A {resource} for a {charge} of {amount} was updated.'.format(
+            body = 'A {resource} for a {charge} of {amount} {currency} was updated.'.format(
                 resource=linkified_id(object_['id'], lower=True),
-                charge=linkified_id(object_['charge'], lower=True), amount=object_['amount'])
+                charge=linkified_id(object_['charge'], lower=True),
+                amount=object_['amount'],
+                currency=object_['currency'].upper(),
+            )
     if category == 'checkout_beta':  # nocoverage
         # Not sure what this is
         raise NotImplementedEventType()
@@ -119,12 +122,12 @@ def topic_and_body(payload: Dict[str, Any]) -> Tuple[str, str]:
                     body += '\nEmail: {}'.format(object_['email'])
                 if object_['metadata']:  # nocoverage
                     for key, value in object_['metadata'].items():
-                        body += '\n{}: {}'.format(key, value)
+                        body += f'\n{key}: {value}'
         if resource == 'discount':
             body = 'Discount {verbed} ([{coupon_name}]({coupon_url})).'.format(
                 verbed=event.replace('_', ' '),
                 coupon_name=object_['coupon']['name'],
-                coupon_url='https://dashboard.stripe.com/{}/{}'.format('coupons', object_['coupon']['id'])
+                coupon_url='https://dashboard.stripe.com/{}/{}'.format('coupons', object_['coupon']['id']),
             )
         if resource == 'source':  # nocoverage
             body = default_body()
@@ -158,16 +161,15 @@ def topic_and_body(payload: Dict[str, Any]) -> Tuple[str, str]:
             # We are taking advantage of logical AND short circuiting here since we need the else
             # statement below.
             object_id = object_['id']
-            invoice_link = 'https://dashboard.stripe.com/invoices/{}'.format(object_id)
-            body = '[Invoice]({invoice_link}) is now paid'.format(invoice_link=invoice_link)
+            invoice_link = f'https://dashboard.stripe.com/invoices/{object_id}'
+            body = f'[Invoice]({invoice_link}) is now paid'
         else:
             body = default_body(update_blacklist=['lines', 'description', 'number', 'finalized_at',
                                                   'status_transitions', 'payment_intent'])
-        if event == 'created':  # nocoverage
+        if event == 'created':
             # Could potentially add link to invoice PDF here
-            body += ' ({reason})\nBilling method: {method}\nTotal: {total}\nAmount due: {due}'.format(
+            body += ' ({reason})\nTotal: {total}\nAmount due: {due}'.format(
                 reason=object_['billing_reason'].replace('_', ' '),
-                method=object_['billing'].replace('_', ' '),
                 total=amount_string(object_['total'], object_['currency']),
                 due=amount_string(object_['amount_due'], object_['currency']))
     if category == 'invoiceitem':
@@ -189,7 +191,7 @@ def topic_and_body(payload: Dict[str, Any]) -> Tuple[str, str]:
         raise NotImplementedEventType()
 
     if body is None:
-        raise UnexpectedWebhookEventType('Stripe', event_type)
+        raise UnsupportedWebhookEventType(event_type)
     return (topic, body)
 
 def amount_string(amount: int, currency: str) -> str:
@@ -198,14 +200,14 @@ def amount_string(amount: int, currency: str) -> str:
     if currency in zero_decimal_currencies:
         decimal_amount = str(amount)  # nocoverage
     else:
-        decimal_amount = '{:.02f}'.format(float(amount) * 0.01)
+        decimal_amount = f'{float(amount) * 0.01:.02f}'
 
     if currency == 'usd':  # nocoverage
         return '$' + decimal_amount
-    return decimal_amount + ' {}'.format(currency.upper())
+    return decimal_amount + f' {currency.upper()}'
 
 def linkified_id(object_id: str, lower: bool=False) -> str:
-    names_and_urls = {
+    names_and_urls: Dict[str, Tuple[str, Optional[str]]] = {
         # Core resources
         'ch': ('Charge', 'charges'),
         'cus': ('Customer', 'customers'),
@@ -239,15 +241,16 @@ def linkified_id(object_id: str, lower: bool=False) -> str:
 
         # Undocumented :|
         'py': ('Payment', 'payments'),
+        'pyr': ('Refund', 'refunds'),  # Pseudo refunds. Not fully tested.
 
         # Connect, Fraud, Orders, etc not implemented
-    }  # type: Dict[str, Tuple[str, Optional[str]]]
+    }
     name, url_prefix = names_and_urls[object_id.split('_')[0]]
     if lower:  # nocoverage
         name = name.lower()
     if url_prefix is None:  # nocoverage
         return name
-    return '[{}](https://dashboard.stripe.com/{}/{})'.format(name, url_prefix, object_id)
+    return f'[{name}](https://dashboard.stripe.com/{url_prefix}/{object_id})'
 
 def stringify(value: Any) -> str:
     if isinstance(value, int) and value > 1500000000 and value < 2000000000:

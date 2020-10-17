@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-
 import glob
 import os
-import sys
 import shutil
-import tempfile
-from typing import List, Optional
+import sys
+from typing import List
 
 ZULIP_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ZULIP_PATH not in sys.path:
     sys.path.append(ZULIP_PATH)
 from scripts.lib.setup_path import setup_path
+
 setup_path()
 
 from zulip_bots.lib import get_bots_directory_path
+
 
 def generate_zulip_bots_static_files() -> None:
     bots_dir = 'static/generated/bots'
@@ -43,16 +43,6 @@ def generate_zulip_bots_static_files() -> None:
     doc_glob_pattern = os.path.join(package_bots_dir, '*/doc.md')
     docs = glob.glob(doc_glob_pattern)
     copyfiles(docs)
-
-def create_png_from_svg(svg_path: str, destination_dir: Optional[str]=None) -> str:
-    import cairosvg
-
-    png_name = os.path.splitext(os.path.basename(svg_path))[0] + '.png'
-    if destination_dir is None:
-        destination_dir = tempfile.gettempdir()
-    png_path = os.path.join(destination_dir, png_name)
-    cairosvg.svg2png(url=svg_path, write_to=png_path)
-    return png_path
 
 if __name__ == "__main__":
     generate_zulip_bots_static_files()

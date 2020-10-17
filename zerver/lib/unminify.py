@@ -1,8 +1,10 @@
-import re
 import os
+import re
+from typing import Dict, List
+
 import sourcemap
 
-from typing import Dict, List
+from zerver.lib.pysa import mark_sanitized
 
 
 class SourceMap:
@@ -10,23 +12,37 @@ class SourceMap:
 
     def __init__(self, sourcemap_dirs: List[str]) -> None:
         self._dirs = sourcemap_dirs
-        self._indices = {}  # type: Dict[str, sourcemap.SourceMapDecoder]
+        self._indices: Dict[str, sourcemap.SourceMapDecoder] = {}
 
     def _index_for(self, minified_src: str) -> sourcemap.SourceMapDecoder:
         '''Return the source map index for minified_src, loading it if not
            already loaded.'''
+
+        # Prevent path traversal
+        assert ".." not in minified_src and "/" not in minified_src
+
         if minified_src not in self._indices:
             for source_dir in self._dirs:
                 filename = os.path.join(source_dir, minified_src + '.map')
                 if os.path.isfile(filename):
-                    with open(filename) as fp:
+                    # Use 'mark_sanitized' to force Pysa to ignore the fact that
+                    # 'filename' is user controlled. While putting user
+                    # controlled data into a filesystem operation is bad, in
+                    # this case it's benign because 'filename' can't traverse
+                    # directories outside of the pre-configured 'sourcemap_dirs'
+                    # (due to the above assertions) and will always end in
+                    # '.map'. Additionally, the result of this function is used
+                    # for error logging and not returned to the user, so
+                    # controlling the loaded file would not be useful to an
+                    # attacker.
+                    with open(mark_sanitized(filename)) as fp:
                         self._indices[minified_src] = sourcemap.load(fp)
                         break
 
         return self._indices[minified_src]
 
     def annotate_stacktrace(self, stacktrace: str) -> str:
-        out = ''  # type: str
+        out: str = ''
         for ln in stacktrace.splitlines():
             out += ln + '\n'
             match = re.search(r'/static/webpack-bundles/([^:]+):(\d+):(\d+)', ln)
@@ -44,8 +60,7 @@ class SourceMap:
                         webpack_prefix = "webpack:///"
                         if display_src.startswith(webpack_prefix):
                             display_src = display_src[len(webpack_prefix):]
-                        out += ('       = %s line %d column %d\n' %
-                                (display_src, result.src_line+1, result.src_col+1))
+                        out += f'       = {display_src} line {result.src_line+1} column {result.src_col+1}\n'
                 except IndexError:
                     out += '       [Unable to look up in source map]\n'
 

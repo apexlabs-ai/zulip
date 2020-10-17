@@ -2,33 +2,42 @@
 spec:
 https://docs.mattermost.com/administration/bulk-export.html
 """
-import os
 import logging
-import subprocess
-import ujson
+import os
 import re
 import shutil
-
+import subprocess
 from typing import Any, Callable, Dict, List, Set
 
+import orjson
 from django.conf import settings
-from django.utils.timezone import now as timezone_now
 from django.forms.models import model_to_dict
+from django.utils.timezone import now as timezone_now
 
-from zerver.models import Recipient, RealmEmoji, Reaction, UserProfile
-from zerver.lib.utils import (
-    process_list_in_batches,
+from zerver.data_import.import_util import (
+    SubscriberHandler,
+    ZerverFieldsT,
+    build_huddle,
+    build_huddle_subscriptions,
+    build_message,
+    build_personal_subscriptions,
+    build_realm,
+    build_realm_emoji,
+    build_recipients,
+    build_stream,
+    build_stream_subscriptions,
+    build_user_profile,
+    build_zerver_realm,
+    create_converted_data_files,
+    make_subscriber_map,
+    make_user_messages,
 )
-from zerver.lib.emoji import name_to_codepoint
-from zerver.data_import.import_util import ZerverFieldsT, build_zerver_realm, \
-    build_stream, build_realm, build_message, create_converted_data_files, \
-    make_subscriber_map, build_recipients, build_user_profile, \
-    build_stream_subscriptions, build_huddle_subscriptions, \
-    build_personal_subscriptions, SubscriberHandler, \
-    build_realm_emoji, make_user_messages, build_huddle
-
 from zerver.data_import.mattermost_user import UserHandler
 from zerver.data_import.sequencer import NEXT_ID, IdMapper
+from zerver.lib.emoji import name_to_codepoint
+from zerver.lib.utils import process_list_in_batches
+from zerver.models import Reaction, RealmEmoji, Recipient, UserProfile
+
 
 def make_realm(realm_id: int, team: Dict[str, Any]) -> ZerverFieldsT:
     # set correct realm details
@@ -124,8 +133,8 @@ def convert_channel_data(channel_data: List[ZerverFieldsT],
         if d['team'] == team_name
     ]
 
-    channel_members_map = {}  # type: Dict[str, List[str]]
-    channel_admins_map = {}  # type: Dict[str, List[str]]
+    channel_members_map: Dict[str, List[str]] = {}
+    channel_admins_map: Dict[str, List[str]] = {}
 
     def initialize_stream_membership_dicts() -> None:
         for channel in channel_data:
@@ -310,7 +319,7 @@ def process_raw_message_batch(realm_id: int,
         content = content.replace('@here', '@**all**')
         return content
 
-    mention_map = dict()  # type: Dict[int, Set[int]]
+    mention_map: Dict[int, Set[int]] = {}
     zerver_message = []
 
     import html2text
@@ -330,7 +339,7 @@ def process_raw_message_batch(realm_id: int,
         content = h.handle(content)
 
         if len(content) > 10000:  # nocoverage
-            logging.info('skipping too-long message of length %s' % (len(content),))
+            logging.info('skipping too-long message of length %s', len(content))
             continue
 
         date_sent = raw_message['date_sent']
@@ -381,7 +390,7 @@ def process_raw_message_batch(realm_id: int,
     )
 
     dump_file_id = NEXT_ID('dump_file_id' + str(realm_id))
-    message_file = "/messages-%06d.json" % (dump_file_id,)
+    message_file = f"/messages-{dump_file_id:06}.json"
     create_converted_data_files(message_json, output_dir, message_file)
 
 def process_posts(num_teams: int,
@@ -430,7 +439,7 @@ def process_posts(num_teams: int,
             sender_id=sender_id,
             content=content,
             date_sent=int(post_dict['create_at'] / 1000),
-            reactions=reactions
+            reactions=reactions,
         )
         if "channel" in post_dict:
             message_dict["channel_name"] = post_dict["channel"]
@@ -672,7 +681,7 @@ def reset_mirror_dummy_users(username_to_user: Dict[str, Dict[str, Any]]) -> Non
         user["is_mirror_dummy"] = False
 
 def mattermost_data_file_to_dict(mattermost_data_file: str) -> Dict[str, Any]:
-    mattermost_data = {}  # type: Dict[str, Any]
+    mattermost_data: Dict[str, Any] = {}
     mattermost_data["version"] = []
     mattermost_data["team"] = []
     mattermost_data["channel"] = []
@@ -681,9 +690,9 @@ def mattermost_data_file_to_dict(mattermost_data_file: str) -> Dict[str, Any]:
     mattermost_data["emoji"] = []
     mattermost_data["direct_channel"] = []
 
-    with open(mattermost_data_file) as fp:
+    with open(mattermost_data_file, "rb") as fp:
         for line in fp:
-            row = ujson.loads(line.rstrip("\n"))
+            row = orjson.loads(line)
             data_type = row["type"]
             if data_type == "post":
                 mattermost_data["post"]["channel_post"].append(row["post"])
@@ -694,7 +703,7 @@ def mattermost_data_file_to_dict(mattermost_data_file: str) -> Dict[str, Any]:
     return mattermost_data
 
 def do_convert_data(mattermost_data_dir: str, output_dir: str, masking_content: bool) -> None:
-    username_to_user = {}  # type: Dict[str, Dict[str, Any]]
+    username_to_user: Dict[str, Dict[str, Any]] = {}
 
     os.makedirs(output_dir, exist_ok=True)
     if os.listdir(output_dir):  # nocoverage
@@ -741,7 +750,7 @@ def do_convert_data(mattermost_data_dir: str, output_dir: str, masking_content: 
         )
         realm['zerver_stream'] = zerver_stream
 
-        zerver_huddle = []  # type: List[ZerverFieldsT]
+        zerver_huddle: List[ZerverFieldsT] = []
         if len(mattermost_data["team"]) == 1:
             zerver_huddle = convert_huddle_data(
                 huddle_data=mattermost_data["direct_channel"],
@@ -796,7 +805,7 @@ def do_convert_data(mattermost_data_dir: str, output_dir: str, masking_content: 
             zerver_subscription=zerver_subscription,
         )
 
-        total_reactions = []  # type: List[Dict[str, Any]]
+        total_reactions: List[Dict[str, Any]] = []
         write_message_data(
             num_teams=len(mattermost_data["team"]),
             team_name=team_name,
@@ -825,7 +834,7 @@ def do_convert_data(mattermost_data_dir: str, output_dir: str, masking_content: 
         create_converted_data_files([], realm_output_dir, '/uploads/records.json')
 
         # Mattermost currently doesn't support exporting attachments
-        attachment = {"zerver_attachment": []}  # type: Dict[str, List[Any]]
+        attachment: Dict[str, List[Any]] = {"zerver_attachment": []}
         create_converted_data_files(attachment, realm_output_dir, '/attachment.json')
 
         logging.info('Start making tarball')

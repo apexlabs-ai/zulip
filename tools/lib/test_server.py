@@ -2,30 +2,30 @@ import os
 import subprocess
 import sys
 import time
-
 from contextlib import contextmanager
-
 from typing import Iterator, Optional
 
 # Verify the Zulip venv is available.
 from tools.lib import sanity_check
+
 sanity_check.check_venv(__file__)
 
 import django
 import requests
 
-MAX_SERVER_WAIT = 90
+MAX_SERVER_WAIT = 180
 
 TOOLS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if TOOLS_DIR not in sys.path:
     sys.path.insert(0, os.path.dirname(TOOLS_DIR))
 
-from zerver.lib.test_fixtures import update_test_databases_if_required
 from scripts.lib.zulip_tools import get_or_create_dev_uuid_var_path
+from zerver.lib.test_fixtures import update_test_databases_if_required
+
 
 def set_up_django(external_host: str) -> None:
+    os.environ['FULL_STACK_ZULIP_TEST'] = '1'
     os.environ['EXTERNAL_HOST'] = external_host
-    os.environ["TORNADO_SERVER"] = "http://127.0.0.1:9983"
     os.environ["LOCAL_UPLOADS_DIR"] = get_or_create_dev_uuid_var_path(
         'test-backend/test_uploads')
     os.environ['DJANGO_SETTINGS_MODULE'] = 'zproject.test_settings'
@@ -37,7 +37,7 @@ def assert_server_running(server: "subprocess.Popen[bytes]", log_file: Optional[
     if server.poll() is not None:
         message = 'Server died unexpectedly!'
         if log_file:
-            message += '\nSee %s\n' % (log_file,)
+            message += f'\nSee {log_file}\n'
         raise RuntimeError(message)
 
 def server_is_up(server: "subprocess.Popen[bytes]", log_file: Optional[str]) -> bool:
@@ -46,12 +46,12 @@ def server_is_up(server: "subprocess.Popen[bytes]", log_file: Optional[str]) -> 
         # We could get a 501 error if the reverse proxy is up but the Django app isn't.
         # Note that zulipdev.com is mapped via DNS to 127.0.0.1.
         return requests.get('http://zulipdev.com:9981/accounts/home').status_code == 200
-    except Exception:
+    except requests.RequestException:
         return False
 
 @contextmanager
 def test_server_running(force: bool=False, external_host: str='testserver',
-                        log_file: Optional[str]=None, dots: bool=False, use_db: bool=True
+                        log_file: Optional[str]=None, dots: bool=False,
                         ) -> Iterator[None]:
     log = sys.stdout
     if log_file:
@@ -63,11 +63,10 @@ def test_server_running(force: bool=False, external_host: str='testserver',
 
     set_up_django(external_host)
 
-    if use_db:
-        update_test_databases_if_required(rebuild_test_database=True)
+    update_test_databases_if_required(rebuild_test_database=True)
 
     # Run this not through the shell, so that we have the actual PID.
-    run_dev_server_command = ['tools/run-dev.py', '--test']
+    run_dev_server_command = ['tools/run-dev.py', '--test', '--streamlined']
     if force:
         run_dev_server_command.append('--force')
     server = subprocess.Popen(run_dev_server_command,
@@ -94,6 +93,7 @@ def test_server_running(force: bool=False, external_host: str='testserver',
     finally:
         assert_server_running(server, log_file)
         server.terminate()
+        server.wait()
 
 if __name__ == '__main__':
     # The code below is for testing this module works

@@ -1,3 +1,5 @@
+# mypy: ignore_errors
+
 # Copyright 2009 Facebook
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -50,18 +52,17 @@ incorrectly.
 # code that didn't work.
 
 
-import os
-import sys
 import functools
 import importlib
+import os
+import subprocess
+import sys
 import traceback
 import types
-import subprocess
 import weakref
 
-from tornado import ioloop
+from tornado import ioloop, process
 from tornado.log import gen_log
-from tornado import process
 
 try:
     import signal
@@ -76,7 +77,7 @@ _has_execv = sys.platform != 'win32'
 _watched_files = set()
 _reload_hooks = []
 _reload_attempted = False
-_io_loops = weakref.WeakKeyDictionary()  # type: ignore # upstream
+_io_loops = weakref.WeakKeyDictionary()
 needs_to_reload = False
 
 def start(io_loop=None, check_time=500):
@@ -189,7 +190,7 @@ def _check_file(modify_times, module, path):
     try:
         importlib.reload(module)
     except Exception:
-        gen_log.error("Error importing %s, not reloading" % (path,))
+        gen_log.error(f"Error importing {path}, not reloading")
         traceback.print_exc()
         return False
     return True
@@ -227,7 +228,7 @@ def _reload():
             # re-executing in the current process, start a new one
             # and cause the current process to exit.  This isn't
             # ideal since the new process is detached from the parent
-            # terminal and thus cannot easily be killed with ctrl-C,
+            # terminal and thus cannot easily be killed with Ctrl-C,
             # but it's better than not being able to autoreload at
             # all.
             # Unfortunately the errno returned in this case does not

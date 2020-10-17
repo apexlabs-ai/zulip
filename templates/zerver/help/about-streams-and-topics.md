@@ -12,7 +12,7 @@ message is about.
 Messages with the same stream and topic are shown together as a
 conversational thread. Here is what it looks like in Zulip.
 
-![](/static/images/help/streams-and-topics.png)
+![Streams and topics](/static/images/help/streams-and-topics.png)
 
 Streams and topics are one of the most rewarding parts of using Zulip.
 
@@ -30,7 +30,7 @@ complicated?
 The short answer is that most users spend many hours a day on chat. A little
 investment up front pays huge dividends in access to a more powerful
 communication paradigm.
-A longer answer is [here](https://zulipchat.com/why-zulip).
+A longer answer is [here](https://zulip.com/why-zulip).
 
 ## Replying to a topic
 

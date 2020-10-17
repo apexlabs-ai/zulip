@@ -1,11 +1,6 @@
-# Update a message
+# Edit a message
 
-Edit/update the content or topic of a message.
-
-`PATCH {{ api_url }}/v1/messages/{msg_id}`
-
-`{msg_id}` in the above URL should be replaced with the ID of the
-message you wish you update.
+{generate_api_description(/messages/{message_id}:patch)}
 
 ## Usage examples
 
@@ -17,24 +12,8 @@ message you wish you update.
 {tab|js}
 
 More examples and documentation can be found [here](https://github.com/zulip/zulip-js).
-```js
-const zulip = require('zulip-js');
 
-// Pass the path to your zuliprc file here.
-const config = {
-    zuliprc: 'zuliprc',
-};
-
-zulip(config).then((client) => {
-    // Update a message
-    const params = {
-        message_id: 131,
-        content: 'New Content',
-    }
-
-    client.messages.update(params).then(console.log);
-});
-```
+{generate_code_example(javascript)|/messages/{message_id}:patch|example}
 
 {tab|curl}
 
@@ -48,9 +27,10 @@ You only have permission to edit a message if:
 
 1. You sent it, **OR**:
 2. This is a topic-only edit for a (no topic) message, **OR**:
-3. This is a topic-only edit and you are an admin.
+3. This is a topic-only edit and you are an admin, **OR**:
+4. This is a topic-only edit and your realm allows users to edit topics.
 
-## Arguments
+## Parameters
 
 {generate_api_arguments_table|zulip.yaml|/messages/{message_id}:patch}
 

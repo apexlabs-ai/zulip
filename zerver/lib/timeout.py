@@ -1,10 +1,9 @@
+import ctypes
+import sys
+import threading
+import time
 from types import TracebackType
 from typing import Any, Callable, Optional, Tuple, Type, TypeVar
-
-import sys
-import time
-import ctypes
-import threading
 
 # Based on https://code.activestate.com/recipes/483752/
 
@@ -35,8 +34,12 @@ def timeout(timeout: float, func: Callable[..., ResultT], *args: Any, **kwargs: 
     class TimeoutThread(threading.Thread):
         def __init__(self) -> None:
             threading.Thread.__init__(self)
-            self.result = None  # type: Optional[ResultT]
-            self.exc_info = (None, None, None)  # type: Tuple[Optional[Type[BaseException]], Optional[BaseException], Optional[TracebackType]]
+            self.result: Optional[ResultT] = None
+            self.exc_info: Tuple[
+                Optional[Type[BaseException]],
+                Optional[BaseException],
+                Optional[TracebackType],
+            ] = (None, None, None)
 
             # Don't block the whole program from exiting
             # if this is the only thread left.

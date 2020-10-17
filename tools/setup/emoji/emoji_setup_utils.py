@@ -1,8 +1,6 @@
 # This file contains various helper functions used by `build_emoji` tool.
 # See docs/subsystems/emoji.md for details on how this system works.
-
 from collections import defaultdict
-
 from typing import Any, Dict, List
 
 # Emojisets that we currently support.
@@ -38,16 +36,22 @@ REMAPPED_EMOJIS = {
 # Emoticons and which emoji they should become. Duplicate emoji are allowed.
 # Changes here should be mimicked in `templates/zerver/help/enable-emoticon-translations.md`.
 EMOTICON_CONVERSIONS = {
-    ':)': ':slight_smile:',
-    '(:': ':slight_smile:',
+    ':)': ':smile:',
+    '(:': ':smile:',
     ':(': ':frown:',
     '<3': ':heart:',
-    ':|': ':expressionless:',
+    ':|': ':neutral:',
     ':/': ':confused:',
+    ';)': ':wink:',
+    ':D': ':grinning:',
+    ':o': ':open_mouth:',
+    ':O': ':open_mouth:',
+    ':p': ':stuck_out_tongue:',
+    ':P': ':stuck_out_tongue:',
 }
 
 def emoji_names_for_picker(emoji_name_maps: Dict[str, Dict[str, Any]]) -> List[str]:
-    emoji_names = []  # type: List[str]
+    emoji_names: List[str] = []
     for emoji_code, name_info in emoji_name_maps.items():
         emoji_names.append(name_info["canonical_name"])
         emoji_names.extend(name_info["aliases"])
@@ -73,8 +77,8 @@ def get_emoji_code(emoji_dict: Dict[str, Any]) -> str:
 # `emoji_data`.
 def generate_emoji_catalog(emoji_data: List[Dict[str, Any]],
                            emoji_name_maps: Dict[str, Dict[str, Any]]) -> Dict[str, List[str]]:
-    sort_order = {}  # type: Dict[str, int]
-    emoji_catalog = defaultdict(list)  # type: Dict[str, List[str]]
+    sort_order: Dict[str, int] = {}
+    emoji_catalog: Dict[str, List[str]] = defaultdict(list)
 
     for emoji_dict in emoji_data:
         emoji_code = get_emoji_code(emoji_dict)
@@ -100,7 +104,7 @@ def emoji_is_universal(emoji_dict: Dict[str, Any]) -> bool:
     return True
 
 def generate_codepoint_to_name_map(emoji_name_maps: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
-    codepoint_to_name = {}  # type: Dict[str, str]
+    codepoint_to_name: Dict[str, str] = {}
     for emoji_code, name_info in emoji_name_maps.items():
         codepoint_to_name[emoji_code] = name_info["canonical_name"]
     return codepoint_to_name

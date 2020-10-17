@@ -1,17 +1,17 @@
 # System documented in https://zulip.readthedocs.io/en/latest/subsystems/logging.html
-
-from django.utils.timezone import now as timezone_now
-from django.utils.timezone import utc as timezone_utc
-
 import hashlib
 import logging
 import threading
 import traceback
+from datetime import datetime, timedelta, timezone
+from logging import Logger
 from typing import Optional, Tuple
-from datetime import datetime, timedelta
+
+import orjson
 from django.conf import settings
 from django.core.cache import cache
-from logging import Logger
+from django.utils.timezone import now as timezone_now
+
 
 class _RateLimitFilter:
     """This class is designed to rate-limit Django error reporting
@@ -28,7 +28,7 @@ class _RateLimitFilter:
     Adapted from https://djangosnippets.org/snippets/2242/.
 
     """
-    last_error = datetime.min.replace(tzinfo=timezone_utc)
+    last_error = datetime.min.replace(tzinfo=timezone.utc)
     # This thread-local variable is used to detect recursive
     # exceptions during exception handling (primarily intended for
     # when accessing the shared cache throws an exception).
@@ -71,7 +71,7 @@ class _RateLimitFilter:
         try:
             # Track duplicate errors
             duplicate = False
-            rate = getattr(settings, '%s_LIMIT' % (self.__class__.__name__.upper(),),
+            rate = getattr(settings, f'{self.__class__.__name__.upper()}_LIMIT',
                            600)  # seconds
 
             if rate > 0:
@@ -119,7 +119,7 @@ def skip_200_and_304(record: logging.LogRecord) -> bool:
     # Apparently, `status_code` is added by Django and is not an actual
     # attribute of LogRecord; as a result, mypy throws an error if we
     # access the `status_code` attribute directly.
-    if getattr(record, 'status_code') in [200, 304]:
+    if getattr(record, 'status_code', None) in [200, 304]:
         return False
 
     return True
@@ -171,7 +171,7 @@ def find_log_origin(record: logging.LogRecord) -> str:
         # responsible for the request in the logs.
         from zerver.tornado.ioloop_logging import logging_data
         shard = logging_data.get('port', 'unknown')
-        logger_name = "{}:{}".format(logger_name, shard)
+        logger_name = f"{logger_name}:{shard}"
 
     return logger_name
 
@@ -211,11 +211,67 @@ class ZulipFormatter(logging.Formatter):
             setattr(record, 'zulip_decorated', True)
         return super().format(record)
 
+class ZulipWebhookFormatter(ZulipFormatter):
+    def _compute_fmt(self) -> str:
+        basic = super()._compute_fmt()
+        multiline = [
+            basic,
+            "user: %(user)s",
+            "client: %(client)s",
+            "url: %(url)s",
+            "content_type: %(content_type)s",
+            "custom_headers:",
+            "%(custom_headers)s",
+            "payload:",
+            "%(payload)s",
+        ]
+        return "\n".join(multiline)
+
+    def format(self, record: logging.LogRecord) -> str:
+        from zerver.lib.request import get_current_request
+        request = get_current_request()
+        if not request:
+            setattr(record, 'user', None)
+            setattr(record, 'client', None)
+            setattr(record, 'url', None)
+            setattr(record, 'content_type', None)
+            setattr(record, 'custom_headers', None)
+            setattr(record, 'payload', None)
+            return super().format(record)
+
+        if request.content_type == 'application/json':
+            payload = request.body
+        else:
+            payload = request.POST.get('payload')
+
+        try:
+            payload = orjson.dumps(orjson.loads(payload), option=orjson.OPT_INDENT_2).decode()
+        except orjson.JSONDecodeError:
+            pass
+
+        custom_header_template = "{header}: {value}\n"
+
+        header_text = ""
+        for header in request.META.keys():
+            if header.lower().startswith('http_x'):
+                header_text += custom_header_template.format(
+                    header=header, value=request.META[header])
+
+        header_message = header_text if header_text else None
+
+        setattr(record, 'user', f"{request.user.delivery_email} ({request.user.realm.string_id})")
+        setattr(record, 'client', request.client.name)
+        setattr(record, 'url', request.META.get('PATH_INFO', None))
+        setattr(record, 'content_type', request.content_type)
+        setattr(record, 'custom_headers', header_message)
+        setattr(record, 'payload', payload)
+        return super().format(record)
+
 def log_to_file(logger: Logger,
                 filename: str,
                 log_format: str="%(asctime)s %(levelname)-8s %(message)s",
                 ) -> None:
-    """Note: `filename` should be declared in zproject/settings.py with zulip_path."""
+    """Note: `filename` should be declared in zproject/computed_settings.py with zulip_path."""
     formatter = logging.Formatter(log_format)
     handler = logging.FileHandler(filename)
     handler.setFormatter(formatter)

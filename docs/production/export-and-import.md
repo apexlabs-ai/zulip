@@ -31,7 +31,7 @@ service (or back):
   JSON files–a format shared by our [data
   import](#import-into-a-new-zulip-server) tools for third-party
   services like
-  [Slack](https://zulipchat.com/help/import-from-slack).
+  [Slack](https://zulip.com/help/import-from-slack).
 
   Like the backup tool, logical data exports must be imported on a
   Zulip server running the same version.  However, logical data
@@ -47,7 +47,7 @@ service (or back):
   inexpensively preserve public stream conversations when
   decommissioning a Zulip organization.
 
-* It's possible to setup [postgres streaming
+* It's possible to set up [postgres streaming
   replication](#postgres-streaming-replication) and the [S3 file
   upload
   backend](../production/upload-backends.html#s3-backend-configuration)
@@ -65,8 +65,9 @@ su zulip -c '/home/zulip/deployments/current/manage.py backup'
 ```
 
 The backup tool provides the following options:
-- `--output`: Path where the output file should be stored. If no path is
- provided, the output file is saved to a temporary directory.
+- `--output=/tmp/backup.tar.gz`: Filename to write the backup tarball
+  to (default: write to a file in `/tmp`).  On success, the
+  console output will show the path to the output tarball.
 - `--skip-db`: Skip backup of the database.  Useful if you're using a
   remote postgres host with its own backup system and just need to
   backup non-database state.
@@ -160,8 +161,8 @@ data includes:
 
 * The postgres database.  You can back it up like any postgres
 database. We have some example tooling for doing that incrementally
-into S3 using [wal-e](https://github.com/wal-e/wal-e) in
-`puppet/zulip_ops/manifests/postgres_common.pp`.
+into S3 using [wal-g](https://github.com/wal-g/wal-g) in
+`puppet/zulip/manifests/postgres_backups.pp`.
 In short, this requires:
   - Zulip 1.4 or newer release.
   - An Amazon S3 bucket for storing the backups.
@@ -173,9 +174,9 @@ In short, this requires:
     s3_backups_bucket = # name of S3 backup
     ```
   - A cron job to run `/usr/local/bin/pg_backup_and_purge.py`. There's puppet
-  config for this in `puppet/zulip_internal/manifests/postgres_common.pp`.
+  config for this in `puppet/zulip/manifests/postgres_backups.pp`.
   - Verification that backups are running via
-  `/usr/lib/nagios/plugins/zulip_postgres_common/check_postgres_backup`.
+  `/usr/lib/nagios/plugins/zulip_postgres_backups/check_postgres_backup`.
 
 * Any user-uploaded files.  If you're using S3 as storage for file
 uploads, this is backed up in S3. But if you have instead set
@@ -184,7 +185,7 @@ will be stored in that directory and you'll want to back it up.
 
 * Your Zulip configuration including secrets from `/etc/zulip/`.
 E.g. if you lose the value of `secret_key`, all users will need to
-login again when you setup a replacement server since you won't be
+log in again when you set up a replacement server since you won't be
 able to verify their cookies. If you lose `avatar_salt`, any
 user-uploaded avatars will need to be re-uploaded (since avatar
 filenames are computed using a hash of `avatar_salt` and user's
@@ -204,9 +205,10 @@ To restore from a manual backup, the process is basically the reverse of the abo
 * Unpack to `/etc/zulip` the `settings.py` and `zulip-secrets.conf` files
   from your backups.
 
-* Restore your database from the backup using `wal-e`. If you ran
-  `initialize-database` anyway above, you'll want to run
+* If you ran `initialize-database` anyway above, you'll want to run
   `scripts/setup/postgres-init-db` to drop the initial database first.
+
+* Restore your database from the backup.
 
 * Reconfigure rabbitmq to use the password from `secrets.conf`
   by running, as root, `scripts/setup/configure-rabbitmq`.
@@ -223,18 +225,17 @@ installation from one server to another.
 We recommend running a disaster recovery after setting up your backups to
 confirm that your backups are working. You may also want to monitor
 that they are up to date using the Nagios plugin at:
-`puppet/zulip_ops/files/nagios_plugins/check_postgres_backup`.
+`puppet/zulip/files/nagios_plugins/zulip_postgres_backups/check_postgres_backup`.
 
 ## Postgres streaming replication
 
 Zulip has database configuration for using Postgres streaming
 replication. You can see the configuration in these files:
 
-* `puppet/zulip_ops/manifests/postgres_slave.pp`
-* `puppet/zulip_ops/manifests/postgres_master.pp`
+* `puppet/zulip_ops/manifests/postgres_appdb.pp`
 * `puppet/zulip_ops/files/postgresql/*`
 
-We use this configuration for zulipchat.com, and it works well in
+We use this configuration for Zulip Cloud, and it works well in
 production, but it's not fully generic.  Contributions to make it a
 supported and documented option for other installations are
 appreciated.
@@ -259,13 +260,13 @@ you're exporting data.  There are two ways to do this:
 preferred if you're not hosting multiple organizations, because it has
 no side effects other than disabling the Zulip server for the
 duration.
-1. `manage.py deactivate_realm  -r 'target_org'`, which deactivates the target
-organization, logging out all active login sessions and preventing all
-accounts from logging in or accessing the API.  This is
+1. Pass `--deactivate` to `./manage export`, which first deactivates
+the target organization, logging out all active login sessions and
+preventing all accounts from logging in or accessing the API.  This is
 preferred for environments like Zulip Cloud where you might want to
 export a single organization without disrupting any other users, and
 the intent is to move hosting of the organization (and forcing users
-to re-login would be required as part of the hosting migration
+to re-log in would be required as part of the hosting migration
 anyway).
 
 We include both options in the instructions below, commented out so
@@ -280,9 +281,9 @@ following commands:
 
 ```
 cd /home/zulip/deployments/current
-# supervisorctl stop all # Stops the Zulip server
-# ./manage.py deactivate_realm -r ''  # Deactivates the organization
-./manage.py export -r ''  # Exports the data
+# supervisorctl stop all                  # Stops the Zulip server
+# export DEACTIVATE_FLAG="--deactivate"   # Deactivates the organization
+./manage.py export -r '' $DEACTIVATE_FLAG # Exports the data
 ```
 
 (The `-r` option lets you specify the organization to export; `''` is
@@ -301,16 +302,16 @@ archive of all the organization's uploaded files.
     * Ensure that the Zulip server you're importing into is running the same
       version of Zulip as the server you're exporting from.
 
-    * For exports from zulipchat.com, you need to [upgrade to
+    * For exports from Zulip Cloud (zulip.com), you need to [upgrade to
       master][upgrade-zulip-from-git], since we run run master on
-      zulipchat.com:
+      Zulip Cloud:
 
       ```
       /home/zulip/deployments/current/scripts/upgrade-zulip-from-git master
       ```
 
       It is not sufficient to be on the latest stable release, as
-      zulipchat.com runs pre-release versions of Zulip that are often
+      zulip.com runs pre-release versions of Zulip that are often
       several months of development ahead of the latest release.
 
     * Note that if your server has limited free RAM, you'll want to
@@ -381,7 +382,7 @@ importing.
 The commands above create an imported organization on the root domain
 (`EXTERNAL_HOST`) of the Zulip installation. You can also import into a
 custom subdomain, e.g. if you already have an existing organization on the
-root domain. Replace the last two lines above with the following, after replacing
+root domain. Replace the last three lines above with the following, after replacing
 `<subdomain>` with the desired subdomain.
 
 ```

@@ -14,13 +14,12 @@ class Command(BaseCommand):
                             action='store_true',
                             help="Actually do it.")
         parser.add_argument('--property',
-                            type=str,
                             help="The property of the stat to be cleared.")
 
     def handle(self, *args: Any, **options: Any) -> None:
         property = options['property']
         if property not in COUNT_STATS:
-            raise CommandError("Invalid property: %s" % (property,))
+            raise CommandError(f"Invalid property: {property}")
         if not options['force']:
             raise CommandError("No action taken. Use --force.")
 

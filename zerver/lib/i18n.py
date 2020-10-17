@@ -1,39 +1,29 @@
-import operator
+# See https://zulip.readthedocs.io/en/latest/translating/internationalization.html
 
-from django.conf import settings
-from django.utils import translation
-from django.utils.translation import ugettext as _
-from django.utils.lru_cache import lru_cache
-
-from itertools import zip_longest
-from typing import Any, List, Dict
-
-import os
-import ujson
 import logging
+import operator
+import os
+from functools import lru_cache
+from itertools import zip_longest
+from typing import Any, Dict, List, Optional
 
-def with_language(string: str, language: str) -> str:
-    """
-    This is an expensive function. If you are using it in a loop, it will
-    make your code slow.
-    """
-    old_language = translation.get_language()
-    translation.activate(language)
-    result = _(string)
-    translation.activate(old_language)
-    return result
+import orjson
+from django.conf import settings
+from django.http import HttpRequest
+from django.utils import translation
+
 
 @lru_cache()
 def get_language_list() -> List[Dict[str, Any]]:
     path = os.path.join(settings.DEPLOY_ROOT, 'locale', 'language_name_map.json')
-    with open(path) as reader:
-        languages = ujson.load(reader)
+    with open(path, "rb") as reader:
+        languages = orjson.loads(reader.read())
         return languages['name_map']
 
 def get_language_list_for_templates(default_language: str) -> List[Dict[str, Dict[str, str]]]:
-    language_list = [l for l in get_language_list()
-                     if 'percent_translated' not in l or
-                        l['percent_translated'] >= 5.]
+    language_list = [lang for lang in get_language_list()
+                     if 'percent_translated' not in lang or
+                        lang['percent_translated'] >= 5.]
 
     formatted_list = []
     lang_len = len(language_list)
@@ -60,7 +50,7 @@ def get_language_list_for_templates(default_language: str) -> List[Dict[str, Dic
                 'name': name,
                 'code': lang['code'],
                 'percent': percent,
-                'selected': selected
+                'selected': selected,
             }
 
         formatted_list.append(item)
@@ -72,7 +62,7 @@ def get_language_name(code: str) -> str:
         if code in (lang['code'], lang['locale']):
             return lang['name']
     # Log problem, but still return a name
-    logging.error("Unknown language code '%s'" % (code,))
+    logging.error("Unknown language code '%s'", code)
     return "Unknown"
 
 def get_available_language_codes() -> List[str]:
@@ -81,7 +71,9 @@ def get_available_language_codes() -> List[str]:
     return codes
 
 def get_language_translation_data(language: str) -> Dict[str, str]:
-    if language == 'zh-hans':
+    if language == 'en':
+        return {}
+    elif language == 'zh-hans':
         language = 'zh_Hans'
     elif language == 'zh-hant':
         language = 'zh_Hant'
@@ -89,8 +81,27 @@ def get_language_translation_data(language: str) -> Dict[str, str]:
         language = 'id_ID'
     path = os.path.join(settings.DEPLOY_ROOT, 'locale', language, 'translations.json')
     try:
-        with open(path) as reader:
-            return ujson.load(reader)
+        with open(path, "rb") as reader:
+            return orjson.loads(reader.read())
     except FileNotFoundError:
-        print('Translation for {} not found at {}'.format(language, path))
+        print(f'Translation for {language} not found at {path}')
         return {}
+
+def get_and_set_request_language(
+    request: HttpRequest,
+    user_configured_language: str,
+    testing_url_language: Optional[str]=None
+) -> str:
+    # We pick a language for the user as follows:
+    # * First priority is the language in the URL, for debugging.
+    # * If not in the URL, we use the language from the user's settings.
+    request_language = testing_url_language
+    if request_language is None:
+        request_language = user_configured_language
+    translation.activate(request_language)
+
+    # We also save the language to the user's session, so that
+    # something reasonable will happen in logged-in portico pages.
+    request.session[translation.LANGUAGE_SESSION_KEY] = translation.get_language()
+
+    return request_language

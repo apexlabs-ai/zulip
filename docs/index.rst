@@ -8,11 +8,11 @@ Welcome to the Zulip documentation!
 
 Welcome! Zulip's documentation is split into four parts:
 
-- `User documentation <https://zulipchat.com/help>`__, for users and
+- `User documentation <https://zulip.com/help>`__, for users and
   administrators of Zulip organizations.
 - `Installation documentation <production/install.html>`__, for
   installing and maintaining a production self-hosted Zulip installation.
-- `API documentation <https://zulipchat.com/api/>`__, for writing
+- `API documentation <https://zulip.com/api/>`__, for writing
   integrations or bots using the Zulip API.
 - `Contributor documentation <overview/contributing.html>`__, for
   developing the Zulip software, translating, submitting bug reports,
@@ -21,8 +21,8 @@ Welcome! Zulip's documentation is split into four parts:
 Zulip has well over 150,000 words of documentation. If you can't find
 what you're looking for, please `let us know
 <contributing/chat-zulip-org.html>`__!  Further information on the
-Zulip project and its features can be found at `https://www.zulip.org
-<https://www.zulip.org>`__.
+Zulip project and its features can be found at `https://www.zulip.com
+<https://www.zulip.com>`__.
 
 This site contains our installation and contributor documentation. If
 this is your first time here, you may want to start with `Production
@@ -32,14 +32,14 @@ installation <production/install.html>`_ or `Contributing to Zulip
 Contents:
 
 * :ref:`Overview <overview>`
-* :ref:`Zulip in Production <zulip-in-production>`
-* :ref:`Development Environment <development-environment>`
-* :ref:`Developer Tutorials <developer-tutorials>`
-* :ref:`Git Guide <git-guide>`
-* :ref:`Code Contribution Guide <code-contribution-guide>`
-* :ref:`Code Testing <code-testing>`
-* :ref:`Subsystem Documentation <subsystem-documentation>`
-* :ref:`Writing Documentation <writing-documentation>`
+* :ref:`Zulip in production <zulip-in-production>`
+* :ref:`Development environment <development-environment>`
+* :ref:`Developer tutorials <developer-tutorials>`
+* :ref:`Git guide <git-guide>`
+* :ref:`Code contribution guide <code-contribution-guide>`
+* :ref:`Code testing <code-testing>`
+* :ref:`Subsystem documentation <subsystem-documentation>`
+* :ref:`Writing documentation <writing-documentation>`
 * :ref:`Translating <translating>`
 
 .. _overview:

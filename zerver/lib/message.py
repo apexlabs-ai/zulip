@@ -1,81 +1,80 @@
-import datetime
-import ujson
-import zlib
-import ahocorasick
 import copy
+import datetime
+import zlib
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
-from django.utils.translation import ugettext as _
-from django.utils.timezone import now as timezone_now
+import ahocorasick
+import orjson
 from django.db import connection
-from django.db.models import Sum
+from django.db.models import Max, Sum
+from django.utils.timezone import now as timezone_now
+from django.utils.translation import ugettext as _
+from psycopg2.sql import SQL
+from typing_extensions import TypedDict
 
 from analytics.lib.counts import COUNT_STATS, RealmCount
-
 from zerver.lib.avatar import get_avatar_field
-import zerver.lib.bugdown as bugdown
 from zerver.lib.cache import (
     cache_with_key,
     generic_bulk_cached_fetch,
     to_dict_cache_key,
     to_dict_cache_key_id,
 )
-from zerver.lib.display_recipient import UserDisplayRecipient, DisplayRecipientT, \
-    bulk_fetch_display_recipients
+from zerver.lib.display_recipient import (
+    DisplayRecipientT,
+    UserDisplayRecipient,
+    bulk_fetch_display_recipients,
+)
+from zerver.lib.markdown import MentionData, markdown_convert, topic_links
+from zerver.lib.markdown import version as markdown_version
 from zerver.lib.request import JsonableError
-from zerver.lib.stream_subscription import (
-    get_stream_subscriptions_for_user,
-)
+from zerver.lib.stream_subscription import get_stream_subscriptions_for_user
 from zerver.lib.timestamp import datetime_to_timestamp
-from zerver.lib.topic import (
-    DB_TOPIC_NAME,
-    MESSAGE__TOPIC,
-    TOPIC_LINKS,
-    TOPIC_NAME,
-)
-from zerver.lib.topic_mutes import (
-    build_topic_mute_checker,
-    topic_is_muted,
-)
-
+from zerver.lib.topic import DB_TOPIC_NAME, MESSAGE__TOPIC, TOPIC_LINKS, TOPIC_NAME
+from zerver.lib.topic_mutes import build_topic_mute_checker, topic_is_muted
 from zerver.models import (
-    get_display_recipient_by_id,
-    get_user_profile_by_id,
-    query_for_ids,
+    MAX_MESSAGE_LENGTH,
+    MAX_TOPIC_NAME_LENGTH,
     Message,
+    Reaction,
     Realm,
     Recipient,
     Stream,
     SubMessage,
     Subscription,
-    UserProfile,
     UserMessage,
-    Reaction,
+    UserProfile,
+    get_display_recipient_by_id,
+    get_user_profile_by_id,
     get_usermessage_by_message_id,
-    MAX_MESSAGE_LENGTH,
-    MAX_TOPIC_NAME_LENGTH
+    query_for_ids,
 )
 
-from typing import Any, Dict, List, Optional, Set, Tuple, Sequence
-from typing_extensions import TypedDict
+RealmAlertWord = Dict[int, List[str]]
 
-RealmAlertWords = Dict[int, List[str]]
+class RawReactionRow(TypedDict):
+    emoji_code: str
+    emoji_name: str
+    message_id: int
+    reaction_type: str
+    user_profile__email: str
+    user_profile__full_name: str
+    user_profile__id: int
 
-RawUnreadMessagesResult = TypedDict('RawUnreadMessagesResult', {
-    'pm_dict': Dict[int, Any],
-    'stream_dict': Dict[int, Any],
-    'huddle_dict': Dict[int, Any],
-    'mentions': Set[int],
-    'muted_stream_ids': List[int],
-    'unmuted_stream_msgs': Set[int],
-})
+class RawUnreadMessagesResult(TypedDict):
+    pm_dict: Dict[int, Any]
+    stream_dict: Dict[int, Any]
+    huddle_dict: Dict[int, Any]
+    mentions: Set[int]
+    muted_stream_ids: List[int]
+    unmuted_stream_msgs: Set[int]
 
-UnreadMessagesResult = TypedDict('UnreadMessagesResult', {
-    'pms': List[Dict[str, Any]],
-    'streams': List[Dict[str, Any]],
-    'huddles': List[Dict[str, Any]],
-    'mentions': List[int],
-    'count': int,
-})
+class UnreadMessagesResult(TypedDict):
+    pms: List[Dict[str, Any]]
+    streams: List[Dict[str, Any]]
+    huddles: List[Dict[str, Any]]
+    mentions: List[int]
+    count: int
 
 # We won't try to fetch more unread message IDs from the database than
 # this limit.  The limit is super high, in large part because it means
@@ -113,11 +112,11 @@ def messages_for_ids(message_ids: List[int],
         extractor=extract_message_dict,
         setter=stringify_message_dict)
 
-    message_list = []  # type: List[Dict[str, Any]]
+    message_list: List[Dict[str, Any]] = []
 
     for message_id in message_ids:
         msg_dict = message_dicts[message_id]
-        msg_dict.update({"flags": user_message_flags[message_id]})
+        msg_dict.update(flags=user_message_flags[message_id])
         if message_id in search_fields:
             msg_dict.update(search_fields[message_id])
         # Make sure that we never send message edit history to clients
@@ -164,31 +163,51 @@ def sew_messages_and_submessages(messages: List[Dict[str, Any]],
             message['submessages'].append(submessage)
 
 def extract_message_dict(message_bytes: bytes) -> Dict[str, Any]:
-    return ujson.loads(zlib.decompress(message_bytes).decode("utf-8"))
+    return orjson.loads(zlib.decompress(message_bytes))
 
 def stringify_message_dict(message_dict: Dict[str, Any]) -> bytes:
-    return zlib.compress(ujson.dumps(message_dict).encode())
+    return zlib.compress(orjson.dumps(message_dict))
 
 @cache_with_key(to_dict_cache_key, timeout=3600*24)
-def message_to_dict_json(message: Message) -> bytes:
-    return MessageDict.to_dict_uncached(message)
+def message_to_dict_json(message: Message, realm_id: Optional[int]=None) -> bytes:
+    return MessageDict.to_dict_uncached([message], realm_id)[message.id]
 
 def save_message_rendered_content(message: Message, content: str) -> str:
     rendered_content = render_markdown(message, content, realm=message.get_realm())
     message.rendered_content = rendered_content
-    message.rendered_content_version = bugdown.version
+    message.rendered_content_version = markdown_version
     message.save_rendered_content()
     return rendered_content
 
 class MessageDict:
+    """MessageDict is the core class responsible for marshalling Message
+    objects obtained from the database into a format that can be sent
+    to clients via the Zulip API, whether via `GET /messages`,
+    outgoing webhooks, or other code paths.  There are two core flows through
+    which this class is used:
+
+    * For just-sent messages, we construct a single `wide_dict` object
+      containing all the data for the message and the related
+      UserProfile models (sender_info and recipient_info); this object
+      can be stored in queues, caches, etc., and then later turned
+      into an API-format JSONable dictionary via finalize_payload.
+
+    * When fetching messages from the database, we fetch their data in
+      bulk using messages_for_ids, which makes use of caching, bulk
+      fetches that skip the Django ORM, etc., to provide an optimized
+      interface for fetching hundreds of thousands of messages from
+      the database and then turning them into API-format JSON
+      dictionaries.
+
+    """
     @staticmethod
-    def wide_dict(message: Message) -> Dict[str, Any]:
+    def wide_dict(message: Message, realm_id: Optional[int]=None) -> Dict[str, Any]:
         '''
         The next two lines get the cacheable field related
         to our message object, with the side effect of
         populating the cache.
         '''
-        json = message_to_dict_json(message)
+        json = message_to_dict_json(message, realm_id)
         obj = extract_message_dict(json)
 
         '''
@@ -210,40 +229,28 @@ class MessageDict:
               shallow copies.  It might be safer to
               make shallow copies here, but performance
               is somewhat important here, as we are
-              often fetching several messages.
+              often fetching hundreds of messages.
         '''
         MessageDict.bulk_hydrate_sender_info(objs)
         MessageDict.bulk_hydrate_recipient_info(objs)
 
         for obj in objs:
-            MessageDict._finalize_payload(obj, apply_markdown, client_gravatar)
+            MessageDict.finalize_payload(obj, apply_markdown, client_gravatar, skip_copy=True)
 
     @staticmethod
     def finalize_payload(obj: Dict[str, Any],
                          apply_markdown: bool,
                          client_gravatar: bool,
-                         keep_rendered_content: bool=False) -> Dict[str, Any]:
+                         keep_rendered_content: bool=False,
+                         skip_copy: bool=False) -> Dict[str, Any]:
         '''
-        Make a shallow copy of the incoming dict to avoid
-        mutation-related bugs.  This function is often
-        called when we're sending out message events to
-        multiple clients, who often want the final dictionary
-        to have different shapes here based on the parameters.
+        By default, we make a shallow copy of the incoming dict to avoid
+        mutation-related bugs.  Code paths that are passing a unique object
+        can pass skip_copy=True to avoid this extra work.
         '''
-        new_obj = copy.copy(obj)
+        if not skip_copy:
+            obj = copy.copy(obj)
 
-        # Next call our worker, which mutates the record in place.
-        MessageDict._finalize_payload(
-            new_obj,
-            apply_markdown=apply_markdown,
-            client_gravatar=client_gravatar,
-            keep_rendered_content=keep_rendered_content
-        )
-        return new_obj
-
-    @staticmethod
-    def _finalize_payload(obj: Dict[str, Any], apply_markdown: bool, client_gravatar: bool,
-                          keep_rendered_content: bool=False) -> None:
         MessageDict.set_sender_avatar(obj, client_gravatar)
         if apply_markdown:
             obj['content_type'] = 'text/html'
@@ -261,33 +268,59 @@ class MessageDict:
         del obj['recipient_type']
         del obj['recipient_type_id']
         del obj['sender_is_mirror_dummy']
+        return obj
 
     @staticmethod
-    def to_dict_uncached(message: Message) -> bytes:
-        dct = MessageDict.to_dict_uncached_helper(message)
-        return stringify_message_dict(dct)
+    def sew_submessages_and_reactions_to_msgs(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        msg_ids = [msg['id'] for msg in messages]
+        submessages = SubMessage.get_raw_db_rows(msg_ids)
+        sew_messages_and_submessages(messages, submessages)
+
+        reactions = Reaction.get_raw_db_rows(msg_ids)
+        return sew_messages_and_reactions(messages, reactions)
 
     @staticmethod
-    def to_dict_uncached_helper(message: Message) -> Dict[str, Any]:
-        return MessageDict.build_message_dict(
-            message = message,
-            message_id = message.id,
-            last_edit_time = message.last_edit_time,
-            edit_history = message.edit_history,
-            content = message.content,
-            topic_name = message.topic_name(),
-            date_sent = message.date_sent,
-            rendered_content = message.rendered_content,
-            rendered_content_version = message.rendered_content_version,
-            sender_id = message.sender.id,
-            sender_realm_id = message.sender.realm_id,
-            sending_client_name = message.sending_client.name,
-            recipient_id = message.recipient.id,
-            recipient_type = message.recipient.type,
-            recipient_type_id = message.recipient.type_id,
-            reactions = Reaction.get_raw_db_rows([message.id]),
-            submessages = SubMessage.get_raw_db_rows([message.id]),
-        )
+    def to_dict_uncached(messages: List[Message], realm_id: Optional[int]=None) -> Dict[int, bytes]:
+        messages_dict = MessageDict.to_dict_uncached_helper(messages, realm_id)
+        encoded_messages = {msg['id']: stringify_message_dict(msg) for msg in messages_dict}
+        return encoded_messages
+
+    @staticmethod
+    def to_dict_uncached_helper(messages: List[Message],
+                                realm_id: Optional[int]=None) -> List[Dict[str, Any]]:
+        # Near duplicate of the build_message_dict + get_raw_db_rows
+        # code path that accepts already fetched Message objects
+        # rather than message IDs.
+
+        def get_rendering_realm_id(message: Message) -> int:
+            # realm_id can differ among users, currently only possible
+            # with cross realm bots.
+            if realm_id is not None:
+                return realm_id
+            if message.recipient.type == Recipient.STREAM:
+                return Stream.objects.get(id=message.recipient.type_id).realm_id
+            return message.sender.realm_id
+
+        message_rows = [{
+            'id': message.id,
+            DB_TOPIC_NAME: message.topic_name(),
+            "date_sent": message.date_sent,
+            "last_edit_time": message.last_edit_time,
+            "edit_history": message.edit_history,
+            "content": message.content,
+            "rendered_content": message.rendered_content,
+            "rendered_content_version": message.rendered_content_version,
+            "recipient_id": message.recipient.id,
+            "recipient__type": message.recipient.type,
+            "recipient__type_id": message.recipient.type_id,
+            "rendering_realm_id": get_rendering_realm_id(message),
+            "sender_id": message.sender.id,
+            "sending_client__name": message.sending_client.name,
+            "sender__realm_id": message.sender.realm_id,
+        } for message in messages]
+
+        MessageDict.sew_submessages_and_reactions_to_msgs(message_rows)
+        return [MessageDict.build_dict_from_raw_db_row(row) for row in message_rows]
 
     @staticmethod
     def get_raw_db_rows(needed_ids: List[int]) -> List[Dict[str, Any]]:
@@ -310,12 +343,7 @@ class MessageDict:
             'sender__realm_id',
         ]
         messages = Message.objects.filter(id__in=needed_ids).values(*fields)
-
-        submessages = SubMessage.get_raw_db_rows(needed_ids)
-        sew_messages_and_submessages(messages, submessages)
-
-        reactions = Reaction.get_raw_db_rows(needed_ids)
-        return sew_messages_and_reactions(messages, reactions)
+        return MessageDict.sew_submessages_and_reactions_to_msgs(messages)
 
     @staticmethod
     def build_dict_from_raw_db_row(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -324,7 +352,6 @@ class MessageDict:
         all the relevant fields populated
         '''
         return MessageDict.build_message_dict(
-            message = None,
             message_id = row['id'],
             last_edit_time = row['last_edit_time'],
             edit_history = row['edit_history'],
@@ -336,6 +363,7 @@ class MessageDict:
             sender_id = row['sender_id'],
             sender_realm_id = row['sender__realm_id'],
             sending_client_name = row['sending_client__name'],
+            rendering_realm_id = row.get('rendering_realm_id', row['sender__realm_id']),
             recipient_id = row['recipient_id'],
             recipient_type = row['recipient__type'],
             recipient_type_id = row['recipient__type_id'],
@@ -345,7 +373,6 @@ class MessageDict:
 
     @staticmethod
     def build_message_dict(
-            message: Optional[Message],
             message_id: int,
             last_edit_time: Optional[datetime.datetime],
             edit_history: Optional[str],
@@ -357,11 +384,12 @@ class MessageDict:
             sender_id: int,
             sender_realm_id: int,
             sending_client_name: str,
+            rendering_realm_id: int,
             recipient_id: int,
             recipient_type: int,
             recipient_type_id: int,
-            reactions: List[Dict[str, Any]],
-            submessages: List[Dict[str, Any]]
+            reactions: List[RawReactionRow],
+            submessages: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
 
         obj = dict(
@@ -378,38 +406,27 @@ class MessageDict:
         obj['sender_realm_id'] = sender_realm_id
 
         # Render topic_links with the stream's realm instead of the
-        # user's realm; this is important for messages sent by
+        # sender's realm; this is important for messages sent by
         # cross-realm bots like NOTIFICATION_BOT.
-        #
-        # TODO: We could potentially avoid this database query in
-        # common cases by optionally passing through the
-        # stream_realm_id through the code path from do_send_messages
-        # (where we've already fetched the data).  It would involve
-        # somewhat messy plumbing, but would probably be worth it.
-        rendering_realm_id = sender_realm_id
-        if message and recipient_type == Recipient.STREAM:
-            rendering_realm_id = Stream.objects.get(id=recipient_type_id).realm_id
-
-        obj[TOPIC_LINKS] = bugdown.topic_links(rendering_realm_id, topic_name)
+        obj[TOPIC_LINKS] = topic_links(rendering_realm_id, topic_name)
 
         if last_edit_time is not None:
             obj['last_edit_timestamp'] = datetime_to_timestamp(last_edit_time)
             assert edit_history is not None
-            obj['edit_history'] = ujson.loads(edit_history)
+            obj['edit_history'] = orjson.loads(edit_history)
 
-        if Message.need_to_render_content(rendered_content, rendered_content_version, bugdown.version):
-            if message is None:
-                # We really shouldn't be rendering objects in this method, but there is
-                # a scenario where we upgrade the version of bugdown and fail to run
-                # management commands to re-render historical messages, and then we
-                # need to have side effects.  This method is optimized to not need full
-                # blown ORM objects, but the bugdown renderer is unfortunately highly
-                # coupled to Message, and we also need to persist the new rendered content.
-                # If we don't have a message object passed in, we get one here.  The cost
-                # of going to the DB here should be overshadowed by the cost of rendering
-                # and updating the row.
-                # TODO: see #1379 to eliminate bugdown dependencies
-                message = Message.objects.select_related().get(id=message_id)
+        if Message.need_to_render_content(rendered_content, rendered_content_version, markdown_version):
+            # We really shouldn't be rendering objects in this method, but there is
+            # a scenario where we upgrade the version of Markdown and fail to run
+            # management commands to re-render historical messages, and then we
+            # need to have side effects.  This method is optimized to not need full
+            # blown ORM objects, but the Markdown renderer is unfortunately highly
+            # coupled to Message, and we also need to persist the new rendered content.
+            # If we don't have a message object passed in, we get one here.  The cost
+            # of going to the DB here should be overshadowed by the cost of rendering
+            # and updating the row.
+            # TODO: see #1379 to eliminate Markdown dependencies
+            message = Message.objects.select_related().get(id=message_id)
 
             assert message is not None  # Hint for mypy.
             # It's unfortunate that we need to have side effects on the message
@@ -446,7 +463,6 @@ class MessageDict:
         query = UserProfile.objects.values(
             'id',
             'full_name',
-            'short_name',
             'delivery_email',
             'email',
             'realm__string_id',
@@ -466,7 +482,6 @@ class MessageDict:
             sender_id = obj['sender_id']
             user_row = sender_dict[sender_id]
             obj['sender_full_name'] = user_row['full_name']
-            obj['sender_short_name'] = user_row['short_name']
             obj['sender_email'] = user_row['email']
             obj['sender_delivery_email'] = user_row['delivery_email']
             obj['sender_realm_str'] = user_row['realm__string_id']
@@ -488,7 +503,6 @@ class MessageDict:
         sender_is_mirror_dummy = obj['sender_is_mirror_dummy']
         sender_email = obj['sender_email']
         sender_full_name = obj['sender_full_name']
-        sender_short_name = obj['sender_short_name']
         sender_id = obj['sender_id']
 
         if recipient_type == Recipient.STREAM:
@@ -499,17 +513,18 @@ class MessageDict:
             if len(display_recipient) == 1:
                 # add the sender in if this isn't a message between
                 # someone and themself, preserving ordering
-                recip = {'email': sender_email,
-                         'full_name': sender_full_name,
-                         'short_name': sender_short_name,
-                         'id': sender_id,
-                         'is_mirror_dummy': sender_is_mirror_dummy}  # type: UserDisplayRecipient
+                recip: UserDisplayRecipient = {
+                    'email': sender_email,
+                    'full_name': sender_full_name,
+                    'id': sender_id,
+                    'is_mirror_dummy': sender_is_mirror_dummy,
+                }
                 if recip['email'] < display_recipient[0]['email']:
                     display_recipient = [recip, display_recipient[0]]
                 elif recip['email'] > display_recipient[0]['email']:
                     display_recipient = [display_recipient[0], recip]
         else:
-            raise AssertionError("Invalid recipient type %s" % (recipient_type,))
+            raise AssertionError(f"Invalid recipient type {recipient_type}")
 
         obj['display_recipient'] = display_recipient
         obj['type'] = display_type
@@ -522,7 +537,7 @@ class MessageDict:
             (
                 obj['recipient_id'],
                 obj['recipient_type'],
-                obj['recipient_type_id']
+                obj['recipient_type_id'],
             ) for obj in objs
         }
         display_recipients = bulk_fetch_display_recipients(recipient_tuples)
@@ -550,13 +565,21 @@ class MessageDict:
 
 class ReactionDict:
     @staticmethod
-    def build_dict_from_raw_db_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    def build_dict_from_raw_db_row(row: RawReactionRow) -> Dict[str, Any]:
         return {'emoji_name': row['emoji_name'],
                 'emoji_code': row['emoji_code'],
                 'reaction_type': row['reaction_type'],
+                # TODO: We plan to remove this redundant user dictionary once
+                # clients are updated to support accessing use user_id.  See
+                # https://github.com/zulip/zulip/pull/14711 for details.
+                #
+                # When we do that, we can likely update the `.values()` query to
+                # not fetch the extra user_profile__* fields from the database
+                # as a small performance optimization.
                 'user': {'email': row['user_profile__email'],
                          'id': row['user_profile__id'],
-                         'full_name': row['user_profile__full_name']}}
+                         'full_name': row['user_profile__full_name']},
+                'user_id': row['user_profile__id']}
 
 
 def access_message(user_profile: UserProfile, message_id: int) -> Tuple[Message, Optional[UserMessage]]:
@@ -650,17 +673,11 @@ def render_markdown(message: Message,
                     content: str,
                     realm: Optional[Realm]=None,
                     realm_alert_words_automaton: Optional[ahocorasick.Automaton]=None,
-                    user_ids: Optional[Set[int]]=None,
-                    mention_data: Optional[bugdown.MentionData]=None,
-                    email_gateway: Optional[bool]=False) -> str:
+                    mention_data: Optional[MentionData]=None,
+                    email_gateway: bool=False) -> str:
     '''
     This is basically just a wrapper for do_render_markdown.
     '''
-
-    if user_ids is None:
-        message_user_ids = set()  # type: Set[int]
-    else:
-        message_user_ids = user_ids
 
     if realm is None:
         realm = message.get_realm()
@@ -674,7 +691,6 @@ def render_markdown(message: Message,
         content=content,
         realm=realm,
         realm_alert_words_automaton=realm_alert_words_automaton,
-        message_user_ids=message_user_ids,
         sent_by_bot=sent_by_bot,
         translate_emoticons=translate_emoticons,
         mention_data=mention_data,
@@ -686,13 +702,12 @@ def render_markdown(message: Message,
 def do_render_markdown(message: Message,
                        content: str,
                        realm: Realm,
-                       message_user_ids: Set[int],
                        sent_by_bot: bool,
                        translate_emoticons: bool,
                        realm_alert_words_automaton: Optional[ahocorasick.Automaton]=None,
-                       mention_data: Optional[bugdown.MentionData]=None,
-                       email_gateway: Optional[bool]=False) -> str:
-    """Return HTML for given markdown. Bugdown may add properties to the
+                       mention_data: Optional[MentionData]=None,
+                       email_gateway: bool=False) -> str:
+    """Return HTML for given Markdown. Markdown may add properties to the
     message object such as `mentions_user_ids`, `mentions_user_group_ids`, and
     `mentions_wildcard`.  These are only on this Django object and are not
     saved in the database.
@@ -705,8 +720,8 @@ def do_render_markdown(message: Message,
     message.links_for_preview = set()
     message.user_ids_with_alert_words = set()
 
-    # DO MAIN WORK HERE -- call bugdown to convert
-    rendered_content = bugdown.convert(
+    # DO MAIN WORK HERE -- call markdown_convert to convert
+    rendered_content = markdown_convert(
         content,
         realm_alert_words_automaton=realm_alert_words_automaton,
         message=message,
@@ -714,26 +729,26 @@ def do_render_markdown(message: Message,
         sent_by_bot=sent_by_bot,
         translate_emoticons=translate_emoticons,
         mention_data=mention_data,
-        email_gateway=email_gateway
+        email_gateway=email_gateway,
     )
     return rendered_content
 
 def huddle_users(recipient_id: int) -> str:
-    display_recipient = get_display_recipient_by_id(recipient_id,
-                                                    Recipient.HUDDLE,
-                                                    None)  # type: DisplayRecipientT
+    display_recipient: DisplayRecipientT = get_display_recipient_by_id(
+        recipient_id, Recipient.HUDDLE, None,
+    )
 
     # str is for streams.
     assert not isinstance(display_recipient, str)
 
-    user_ids = [obj['id'] for obj in display_recipient]  # type: List[int]
+    user_ids: List[int] = [obj['id'] for obj in display_recipient]
     user_ids = sorted(user_ids)
     return ','.join(str(uid) for uid in user_ids)
 
 def aggregate_message_dict(input_dict: Dict[int, Dict[str, Any]],
                            lookup_fields: List[str],
                            collect_senders: bool) -> List[Dict[str, Any]]:
-    lookup_dict = dict()  # type: Dict[Tuple[Any, ...], Dict[str, Any]]
+    lookup_dict: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
 
     '''
     A concrete example might help explain the inputs here:
@@ -768,7 +783,7 @@ def aggregate_message_dict(input_dict: Dict[int, Dict[str, Any]],
     '''
 
     for message_id, attribute_dict in input_dict.items():
-        lookup_key = tuple([attribute_dict[f] for f in lookup_fields])
+        lookup_key = tuple(attribute_dict[f] for f in lookup_fields)
         if lookup_key not in lookup_dict:
             obj = {}
             for f in lookup_fields:
@@ -786,7 +801,7 @@ def aggregate_message_dict(input_dict: Dict[int, Dict[str, Any]],
     for dct in lookup_dict.values():
         dct['unread_message_ids'].sort()
         if collect_senders:
-            dct['sender_ids'] = sorted(list(dct['sender_ids']))
+            dct['sender_ids'] = sorted(dct['sender_ids'])
 
     sorted_keys = sorted(lookup_dict.keys())
 
@@ -796,7 +811,7 @@ def get_inactive_recipient_ids(user_profile: UserProfile) -> List[int]:
     rows = get_stream_subscriptions_for_user(user_profile).filter(
         active=False,
     ).values(
-        'recipient_id'
+        'recipient_id',
     )
     inactive_recipient_ids = [
         row['recipient_id']
@@ -808,7 +823,7 @@ def get_muted_stream_ids(user_profile: UserProfile) -> List[int]:
         active=True,
         is_muted=True,
     ).values(
-        'recipient__type_id'
+        'recipient__type_id',
     )
     muted_stream_ids = [
         row['recipient__type_id']
@@ -819,21 +834,20 @@ def get_starred_message_ids(user_profile: UserProfile) -> List[int]:
     return list(UserMessage.objects.filter(
         user_profile=user_profile,
     ).extra(
-        where=[UserMessage.where_starred()]
+        where=[UserMessage.where_starred()],
     ).order_by(
-        'message_id'
+        'message_id',
     ).values_list('message_id', flat=True)[0:10000])
 
 def get_raw_unread_data(user_profile: UserProfile) -> RawUnreadMessagesResult:
-
     excluded_recipient_ids = get_inactive_recipient_ids(user_profile)
 
     user_msgs = UserMessage.objects.filter(
-        user_profile=user_profile
+        user_profile=user_profile,
     ).exclude(
-        message__recipient_id__in=excluded_recipient_ids
+        message__recipient_id__in=excluded_recipient_ids,
     ).extra(
-        where=[UserMessage.where_unread()]
+        where=[UserMessage.where_unread()],
     ).values(
         'message_id',
         'message__sender_id',
@@ -848,8 +862,33 @@ def get_raw_unread_data(user_profile: UserProfile) -> RawUnreadMessagesResult:
     user_msgs = list(user_msgs[:MAX_UNREAD_MESSAGES])
 
     rows = list(reversed(user_msgs))
+    return extract_unread_data_from_um_rows(rows, user_profile)
+
+def extract_unread_data_from_um_rows(
+    rows: List[Dict[str, Any]],
+    user_profile: Optional[UserProfile]
+) -> RawUnreadMessagesResult:
+
+    pm_dict: Dict[int, Any] = {}
+    stream_dict: Dict[int, Any] = {}
+    unmuted_stream_msgs: Set[int] = set()
+    huddle_dict: Dict[int, Any] = {}
+    mentions: Set[int] = set()
+
+    raw_unread_messages: RawUnreadMessagesResult = dict(
+        pm_dict=pm_dict,
+        stream_dict=stream_dict,
+        muted_stream_ids=[],
+        unmuted_stream_msgs=unmuted_stream_msgs,
+        huddle_dict=huddle_dict,
+        mentions=mentions,
+    )
+
+    if user_profile is None:
+        return raw_unread_messages  # nocoverage
 
     muted_stream_ids = get_muted_stream_ids(user_profile)
+    raw_unread_messages['muted_stream_ids'] = muted_stream_ids
 
     topic_mute_checker = build_topic_mute_checker(user_profile)
 
@@ -862,7 +901,7 @@ def get_raw_unread_data(user_profile: UserProfile) -> RawUnreadMessagesResult:
 
         return False
 
-    huddle_cache = {}  # type: Dict[int, str]
+    huddle_cache: Dict[int, str] = {}
 
     def get_huddle_users(recipient_id: int) -> str:
         if recipient_id in huddle_cache:
@@ -871,12 +910,6 @@ def get_raw_unread_data(user_profile: UserProfile) -> RawUnreadMessagesResult:
         user_ids_string = huddle_users(recipient_id)
         huddle_cache[recipient_id] = user_ids_string
         return user_ids_string
-
-    pm_dict = {}
-    stream_dict = {}
-    unmuted_stream_msgs = set()
-    huddle_dict = {}
-    mentions = set()
 
     for row in rows:
         message_id = row['message_id']
@@ -931,14 +964,7 @@ def get_raw_unread_data(user_profile: UserProfile) -> RawUnreadMessagesResult:
             else:  # nocoverage # TODO: Test wildcard mentions in PMs.
                 mentions.add(message_id)
 
-    return dict(
-        pm_dict=pm_dict,
-        stream_dict=stream_dict,
-        muted_stream_ids=muted_stream_ids,
-        unmuted_stream_msgs=unmuted_stream_msgs,
-        huddle_dict=huddle_dict,
-        mentions=mentions,
-    )
+    return raw_unread_messages
 
 def aggregate_unread_data(raw_data: RawUnreadMessagesResult) -> UnreadMessagesResult:
 
@@ -975,12 +1001,12 @@ def aggregate_unread_data(raw_data: RawUnreadMessagesResult) -> UnreadMessagesRe
         collect_senders=False,
     )
 
-    result = dict(
+    result: UnreadMessagesResult = dict(
         pms=pm_objects,
         streams=stream_objects,
         huddles=huddle_objects,
         mentions=mentions,
-        count=count)  # type: UnreadMessagesResult
+        count=count)
 
     return result
 
@@ -1001,7 +1027,7 @@ def apply_unread_message_event(user_profile: UserProfile,
         else:
             message_type = 'huddle'
     else:
-        raise AssertionError("Invalid message type %s" % (message['type'],))
+        raise AssertionError("Invalid message type {}".format(message['type']))
 
     sender_id = message['sender_id']
 
@@ -1084,6 +1110,17 @@ def update_first_visible_message_id(realm: Realm) -> None:
         realm.first_visible_message_id = first_visible_message_id
     realm.save(update_fields=["first_visible_message_id"])
 
+def get_last_message_id() -> int:
+    # We generally use this function to populate RealmAuditLog, and
+    # the max id here is actually systemwide, not per-realm.  I
+    # assume there's some advantage in not filtering by realm.
+    last_id = Message.objects.aggregate(Max('id'))['id__max']
+    if last_id is None:
+        # During initial realm creation, there might be 0 messages in
+        # the database; in that case, the `aggregate` query returns
+        # None.  Since we want an int for "beginning of time", use -1.
+        last_id = -1
+    return last_id
 
 def get_recent_conversations_recipient_id(user_profile: UserProfile,
                                           recipient_id: int,
@@ -1130,7 +1167,7 @@ def get_recent_private_conversations(user_profile: UserProfile) -> Dict[int, Dic
     recipient_map = {}
     my_recipient_id = user_profile.recipient_id
 
-    query = '''
+    query = SQL('''
     SELECT
         subquery.recipient_id, MAX(subquery.message_id)
     FROM (
@@ -1144,11 +1181,11 @@ def get_recent_private_conversations(user_profile: UserProfile) -> Dict[int, Dic
         ON
             um.message_id = m.id
         WHERE
-            um.user_profile_id=%(user_profile_id)d AND
+            um.user_profile_id=%(user_profile_id)s AND
             um.flags & 2048 <> 0 AND
-            m.recipient_id <> %(my_recipient_id)d
+            m.recipient_id <> %(my_recipient_id)s
         ORDER BY message_id DESC
-        LIMIT %(conversation_limit)d)
+        LIMIT %(conversation_limit)s)
         UNION ALL
         (SELECT
             m.id AS message_id,
@@ -1160,21 +1197,20 @@ def get_recent_private_conversations(user_profile: UserProfile) -> Dict[int, Dic
         ON
             m.sender_id = sender_profile.id
         WHERE
-            m.recipient_id=%(my_recipient_id)d
+            m.recipient_id=%(my_recipient_id)s
         ORDER BY message_id DESC
-        LIMIT %(conversation_limit)d)
+        LIMIT %(conversation_limit)s)
     ) AS subquery
     GROUP BY subquery.recipient_id
-    ''' % dict(
-        user_profile_id=user_profile.id,
-        conversation_limit=RECENT_CONVERSATIONS_LIMIT,
-        my_recipient_id=my_recipient_id,
-    )
+    ''')
 
-    cursor = connection.cursor()
-    cursor.execute(query)
-    rows = cursor.fetchall()
-    cursor.close()
+    with connection.cursor() as cursor:
+        cursor.execute(query, {
+            "user_profile_id": user_profile.id,
+            "conversation_limit": RECENT_CONVERSATIONS_LIMIT,
+            "my_recipient_id": my_recipient_id,
+        })
+        rows = cursor.fetchall()
 
     # The resulting rows will be (recipient_id, max_message_id)
     # objects for all parties we've had recent (group?) private
@@ -1183,7 +1219,7 @@ def get_recent_private_conversations(user_profile: UserProfile) -> Dict[int, Dic
     for recipient_id, max_message_id in rows:
         recipient_map[recipient_id] = dict(
             max_message_id=max_message_id,
-            user_ids=list(),
+            user_ids=[],
         )
 
     # Now we need to map all the recipient_id objects to lists of user IDs

@@ -1,4 +1,4 @@
-# Advanced Setup (non-Vagrant)
+# Advanced setup (non-Vagrant)
 
 Contents:
 
@@ -12,8 +12,8 @@ Contents:
 If you'd like to install a Zulip development environment on a computer
 that's running one of:
 
-* Ubuntu 20.04 Focal, 19.04 Disco, 18.10 Cosmic, 18.04 Bionic, 16.04 Xenial
-* Debian 9 Stretch or 10 Buster
+* Ubuntu 20.04 Focal, 18.04 Bionic
+* Debian 10 Buster
 * Centos 7 (beta)
 * Fedora 29 (beta)
 * RHEL 7 (beta)
@@ -36,7 +36,7 @@ Start by [cloning your fork of the Zulip repository][zulip-rtd-git-cloning]
 and [connecting the Zulip upstream repository][zulip-rtd-git-connect]:
 
 ```
-git clone --config pull.rebase https://github.com/YOURUSERNAME/zulip.git
+git clone --config pull.rebase git@github.com:YOURUSERNAME/zulip.git
 cd zulip
 git remote add -f upstream https://github.com/zulip/zulip.git
 ```
@@ -56,7 +56,7 @@ on using the Zulip development
 environment](../development/setup-vagrant.html#step-4-developing),
 ignoring the parts about `vagrant` (since you're not using it).
 
-## Installing directly on Windows 10 (Experimental)
+## Installing directly on Windows 10 (experimental)
 
 We will be using Microsoft's new feature [WSL
 2](https://docs.microsoft.com/en-us/windows/wsl/wsl2-about) for
@@ -92,8 +92,8 @@ Store.
    and [connecting the Zulip upstream repository][zulip-rtd-git-connect]:
 
    ```
-   git clone --config pull.rebase https://github.com/YOURUSERNAME/zulip.git ~/zulip
-   cd ~/zulip
+   git clone --config pull.rebase git@github.com:YOURUSERNAME/zulip.git ~/zulip
+   cd zulip
    git remote add -f upstream https://github.com/zulip/zulip.git
    ```
 
@@ -149,7 +149,7 @@ eventually eliminate this documentation section altogether).
 
 You can use
 [our provisioning tool](#installing-directly-on-ubuntu-debian-centos-or-fedora)
-to setup the Zulip development environment on current versions of
+to set up the Zulip development environment on current versions of
 these platforms reliably and easily, so we no long maintain manual
 installation instructions for these platforms.
 
@@ -170,13 +170,14 @@ Start by [cloning your fork of the Zulip repository][zulip-rtd-git-cloning]
 and [connecting the Zulip upstream repository][zulip-rtd-git-connect]:
 
 ```
-git clone --config pull.rebase https://github.com/YOURUSERNAME/zulip.git
+git clone --config pull.rebase git@github.com:YOURUSERNAME/zulip.git
+cd zulip
 git remote add -f upstream https://github.com/zulip/zulip.git
 ```
 
 ```
 doas pkg_add sudo bash gcc postgresql-server redis rabbitmq \
-    memcached libmemcached py-Pillow py-cryptography py-cffi
+    memcached py-Pillow py-cryptography py-cffi
 
 # Point environment to custom include locations and use newer GCC
 # (needed for Node modules):
@@ -242,9 +243,9 @@ else
 fi
 ./scripts/setup/configure-rabbitmq
 ./tools/setup/postgres-init-dev-db
-./tools/do-destroy-rebuild-database
+./tools/rebuild-dev-database
 ./tools/setup/postgres-init-test-db
-./tools/do-destroy-rebuild-test-database
+./tools/rebuild-test-database
 ./manage.py compilemessages
 ```
 
@@ -284,7 +285,7 @@ AWS Cloud9 is a cloud-based integrated development environment (IDE)
 that lets you write, run, and debug your code with just a browser. It
 includes a code editor, debugger, and terminal.
 
-This section documents how to setup the Zulip development environment
+This section documents how to set up the Zulip development environment
 in a cloud9 workspace.  If you don't have an existing cloud9 account,
 you can sign up [here](https://aws.amazon.com/cloud9/).
 

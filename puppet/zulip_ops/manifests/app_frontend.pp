@@ -4,11 +4,12 @@ class zulip_ops::app_frontend {
   include zulip::rabbit
   include zulip::postfix_localmail
   include zulip::static_asset_compiler
+  include zulip::app_frontend_monitoring
   $app_packages = [# Needed for the ssh tunnel to the redis server
     'autossh',
   ]
   package { $app_packages: ensure => 'installed' }
-  $hosts_domain = zulipconf('nagios', 'hosts_domain', undef)
+  $default_host_domain = zulipconf('nagios', 'default_host_domain', undef)
 
   file { '/etc/logrotate.d/zulip':
     ensure => file,
@@ -16,29 +17,6 @@ class zulip_ops::app_frontend {
     group  => 'root',
     mode   => '0644',
     source => 'puppet:///modules/zulip/logrotate/zulip',
-  }
-
-  file { '/etc/log2zulip.conf':
-    ensure => file,
-    owner  => 'zulip',
-    group  => 'zulip',
-    mode   => '0644',
-    source => 'puppet:///modules/zulip_ops/log2zulip.conf',
-  }
-
-  file { '/etc/cron.d/log2zulip':
-    ensure => absent,
-  }
-
-  file { '/etc/log2zulip.zuliprc':
-    ensure => file,
-    owner  => 'zulip',
-    group  => 'zulip',
-    mode   => '0600',
-    source => 'puppet:///modules/zulip_ops/log2zulip.zuliprc',
-  }
-  file { '/etc/cron.d/check-apns-tokens':
-    ensure => absent,
   }
 
   file { '/etc/supervisor/conf.d/redis_tunnel.conf':

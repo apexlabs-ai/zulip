@@ -8,16 +8,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import ujson
+from typing import List
 
-from typing import Optional, List
+import orjson
 
 TOOLS_DIR = os.path.abspath(os.path.dirname(__file__))
 ZULIP_PATH = os.path.dirname(TOOLS_DIR)
 REQS_DIR = os.path.join(ZULIP_PATH, 'requirements')
 CACHE_DIR = os.path.join(ZULIP_PATH, 'var', 'tmp')
-if 'TRAVIS' in os.environ:
-    CACHE_DIR = os.path.join(os.environ['HOME'], 'misc')
 CACHE_FILE = os.path.join(CACHE_DIR, 'requirements_hashes')
 
 def print_diff(path_file1: str, path_file2: str) -> None:
@@ -51,7 +49,7 @@ def test_locked_requirements(tmp_dir: str) -> bool:
 
     return same
 
-def get_requirements_hash(tmp_dir: str, use_test_lock_files: Optional[bool] = False) -> str:
+def get_requirements_hash(tmp_dir: str, use_test_lock_files: bool = False) -> str:
     sha1 = hashlib.sha1()
     reqs_files = sorted(glob.glob(os.path.join(REQS_DIR, "*.in")))
     lock_files_path = REQS_DIR
@@ -66,12 +64,12 @@ def get_requirements_hash(tmp_dir: str, use_test_lock_files: Optional[bool] = Fa
 def may_be_setup_cache() -> None:
     os.makedirs(CACHE_DIR, exist_ok=True)
     if not os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, 'w') as fp:
-            ujson.dump([], fp)
+        with open(CACHE_FILE, 'wb') as fp:
+            fp.write(orjson.dumps([]))
 
 def load_cache() -> List[str]:
-    with open(CACHE_FILE) as fp:
-        hash_list = ujson.load(fp)
+    with open(CACHE_FILE, "rb") as fp:
+        hash_list = orjson.loads(fp.read())
     return hash_list
 
 def update_cache(hash_list: List[str]) -> None:
@@ -79,8 +77,8 @@ def update_cache(hash_list: List[str]) -> None:
     # not a problem as it is cheap to do.
     if len(hash_list) > 100:
         hash_list = hash_list[-100:]
-    with open(CACHE_FILE, 'w') as fp:
-        ujson.dump(hash_list, fp)
+    with open(CACHE_FILE, 'wb') as fp:
+        fp.write(orjson.dumps(hash_list))
 
 def main() -> None:
     may_be_setup_cache()
@@ -99,7 +97,7 @@ def main() -> None:
     # Cache the hash so that we need not to run the `update_locked_requirements`
     # tool again for checking this set of requirements.
     valid_hash = get_requirements_hash(tmp_dir, use_test_lock_files=True)
-    update_cache([h for h in hash_list if h != valid_hash] + [valid_hash])
+    update_cache([*(h for h in hash_list if h != valid_hash), valid_hash])
     if not requirements_are_consistent:
         for test_locked_file in glob.glob(os.path.join(tmp_dir, "*.txt")):
             fn = os.path.basename(test_locked_file)

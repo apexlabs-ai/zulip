@@ -1,36 +1,44 @@
 # See https://zulip.readthedocs.io/en/latest/subsystems/caching.html for docs
-from functools import wraps
+import hashlib
+import logging
+import os
+import re
+import secrets
+import sys
+import time
+import traceback
+from functools import lru_cache, wraps
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+    cast,
+)
 
-from django.utils.lru_cache import lru_cache
+from django.conf import settings
 from django.core.cache import cache as djcache
 from django.core.cache import caches
-from django.conf import settings
-from django.db.models import Q
 from django.core.cache.backends.base import BaseCache
+from django.db.models import Q
 from django.http import HttpRequest
 
-from typing import Any, Callable, Dict, Iterable, List, \
-    Optional, Sequence, TypeVar, Tuple, TYPE_CHECKING
-
-from zerver.lib.utils import statsd, statsd_key, make_safe_digest
-import time
-import base64
-import logging
-import random
-import re
-import sys
-import traceback
-import os
-import hashlib
+from zerver.lib.utils import make_safe_digest, statsd, statsd_key
 
 if TYPE_CHECKING:
     # These modules have to be imported for type annotations but
     # they cannot be imported at runtime due to cyclic dependency.
-    from zerver.models import UserProfile, Realm, Message
+    from zerver.models import Message, Realm, UserProfile
 
 MEMCACHED_MAX_KEY_LENGTH = 250
 
-ReturnT = TypeVar('ReturnT')  # Useful for matching return types via Callable[..., ReturnT]
+FuncT = TypeVar('FuncT', bound=Callable[..., object])
 
 logger = logging.getLogger()
 
@@ -60,12 +68,12 @@ def remote_cache_stats_finish() -> None:
     remote_cache_total_time += (time.time() - remote_cache_time_start)
 
 def get_or_create_key_prefix() -> str:
-    if settings.CASPER_TESTS:
-        # This sets the prefix for the benefit of the Casper tests.
+    if settings.PUPPETEER_TESTS:
+        # This sets the prefix for the benefit of the Puppeteer tests.
         #
         # Having a fixed key is OK since we don't support running
-        # multiple copies of the casper tests at the same time anyway.
-        return 'casper_tests:'
+        # multiple copies of the puppeteer tests at the same time anyway.
+        return 'puppeteer_tests:'
     elif settings.TEST_SUITE:
         # The Python tests overwrite KEY_PREFIX on each test, but use
         # this codepath as well, just to save running the more complex
@@ -78,8 +86,7 @@ def get_or_create_key_prefix() -> str:
     filename = os.path.join(settings.DEPLOY_ROOT, "var", "remote_cache_prefix")
     try:
         fd = os.open(filename, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o444)
-        random_hash = hashlib.sha256(str(random.getrandbits(256)).encode('utf-8')).digest()
-        prefix = base64.b16encode(random_hash)[:32].decode('utf-8').lower() + ':'
+        prefix = secrets.token_hex(16) + ':'
         # This does close the underlying file
         with os.fdopen(fd, 'w') as f:
             f.write(prefix + "\n")
@@ -101,7 +108,7 @@ def get_or_create_key_prefix() -> str:
 
     return prefix
 
-KEY_PREFIX = get_or_create_key_prefix()  # type: str
+KEY_PREFIX: str = get_or_create_key_prefix()
 
 def bounce_key_prefix_for_testing(test_name: str) -> None:
     global KEY_PREFIX
@@ -117,16 +124,16 @@ def get_cache_backend(cache_name: Optional[str]) -> BaseCache:
 
 def get_cache_with_key(
         keyfunc: Callable[..., str],
-        cache_name: Optional[str]=None
-) -> Callable[[Callable[..., ReturnT]], Callable[..., ReturnT]]:
+        cache_name: Optional[str]=None,
+) -> Callable[[FuncT], FuncT]:
     """
     The main goal of this function getting value from the cache like in the "cache_with_key".
     A cache value can contain any data including the "None", so
     here used exception for case if value isn't found in the cache.
     """
-    def decorator(func: Callable[..., ReturnT]) -> (Callable[..., ReturnT]):
+    def decorator(func: FuncT) -> FuncT:
         @wraps(func)
-        def func_with_caching(*args: Any, **kwargs: Any) -> Callable[..., ReturnT]:
+        def func_with_caching(*args: object, **kwargs: object) -> object:
             key = keyfunc(*args, **kwargs)
             try:
                 val = cache_get(key, cache_name=cache_name)
@@ -139,14 +146,14 @@ def get_cache_with_key(
                 return val[0]
             raise NotFoundInCache()
 
-        return func_with_caching
+        return cast(FuncT, func_with_caching)  # https://github.com/python/mypy/issues/1927
 
     return decorator
 
 def cache_with_key(
         keyfunc: Callable[..., str], cache_name: Optional[str]=None,
-        timeout: Optional[int]=None, with_statsd_key: Optional[str]=None
-) -> Callable[[Callable[..., ReturnT]], Callable[..., ReturnT]]:
+        timeout: Optional[int]=None, with_statsd_key: Optional[str]=None,
+) -> Callable[[FuncT], FuncT]:
     """Decorator which applies Django caching to a function.
 
        Decorator argument is a function which computes a cache key
@@ -154,9 +161,9 @@ def cache_with_key(
        for avoiding collisions with other uses of this decorator or
        other uses of caching."""
 
-    def decorator(func: Callable[..., ReturnT]) -> Callable[..., ReturnT]:
+    def decorator(func: FuncT) -> FuncT:
         @wraps(func)
-        def func_with_caching(*args: Any, **kwargs: Any) -> ReturnT:
+        def func_with_caching(*args: object, **kwargs: object) -> object:
             key = keyfunc(*args, **kwargs)
 
             try:
@@ -176,7 +183,7 @@ def cache_with_key(
                 metric_key = statsd_key(key)
 
             status = "hit" if val is not None else "miss"
-            statsd.incr("cache%s.%s.%s" % (extra, metric_key, status))
+            statsd.incr(f"cache{extra}.{metric_key}.{status}")
 
             # Values are singleton tuples so that we can distinguish
             # a result of None from a missing key.
@@ -189,7 +196,7 @@ def cache_with_key(
 
             return val
 
-        return func_with_caching
+        return cast(FuncT, func_with_caching)  # https://github.com/python/mypy/issues/1927
 
     return decorator
 
@@ -198,7 +205,7 @@ class InvalidCacheKeyException(Exception):
 
 def log_invalid_cache_keys(stack_trace: str, key: List[str]) -> None:
     logger.warning(
-        "Invalid cache key used: {}\nStack trace: {}\n".format(key, stack_trace)
+        "Invalid cache key used: %s\nStack trace: %s\n", key, stack_trace,
     )
 
 def validate_cache_key(key: str) -> None:
@@ -216,7 +223,7 @@ def validate_cache_key(key: str) -> None:
     if not bool(re.fullmatch(r"([!-~])+", key)):
         raise InvalidCacheKeyException("Invalid characters in the cache key: " + key)
     if len(key) > MEMCACHED_MAX_KEY_LENGTH:
-        raise InvalidCacheKeyException("Cache key too long: {} Length: {}".format(key, len(key)))
+        raise InvalidCacheKeyException(f"Cache key too long: {key} Length: {len(key)}")
 
 def cache_set(key: str, val: Any, cache_name: Optional[str]=None, timeout: Optional[int]=None) -> None:
     final_key = KEY_PREFIX + key
@@ -338,23 +345,10 @@ CacheItemT = TypeVar('CacheItemT')
 # serializable objects, will be the object; if encoded, bytes.
 CompressedItemT = TypeVar('CompressedItemT')
 
-def default_extractor(obj: CompressedItemT) -> ItemT:
-    return obj  # type: ignore # Need a type assert that ItemT=CompressedItemT
-
-def default_setter(obj: ItemT) -> CompressedItemT:
-    return obj  # type: ignore # Need a type assert that ItemT=CompressedItemT
-
-def default_id_fetcher(obj: ItemT) -> ObjKT:
-    return obj.id  # type: ignore # Need ItemT/CompressedItemT typevars to be a Django protocol
-
-def default_cache_transformer(obj: ItemT) -> CacheItemT:
-    return obj  # type: ignore # Need a type assert that ItemT=CacheItemT
-
 # Required Arguments are as follows:
 # * object_ids: The list of object ids to look up
 # * cache_key_function: object_id => cache key
 # * query_function: [object_ids] => [objects from database]
-# Optional keyword arguments:
 # * setter: Function to call before storing items to cache (e.g. compression)
 # * extractor: Function to call on items returned from cache
 #   (e.g. decompression).  Should be the inverse of the setter
@@ -368,23 +362,25 @@ def generic_bulk_cached_fetch(
         cache_key_function: Callable[[ObjKT], str],
         query_function: Callable[[List[ObjKT]], Iterable[ItemT]],
         object_ids: Sequence[ObjKT],
-        extractor: Callable[[CompressedItemT], CacheItemT] = default_extractor,
-        setter: Callable[[CacheItemT], CompressedItemT] = default_setter,
-        id_fetcher: Callable[[ItemT], ObjKT] = default_id_fetcher,
-        cache_transformer: Callable[[ItemT], CacheItemT] = default_cache_transformer,
+        *,
+        extractor: Callable[[CompressedItemT], CacheItemT],
+        setter: Callable[[CacheItemT], CompressedItemT],
+        id_fetcher: Callable[[ItemT], ObjKT],
+        cache_transformer: Callable[[ItemT], CacheItemT],
 ) -> Dict[ObjKT, CacheItemT]:
     if len(object_ids) == 0:
         # Nothing to fetch.
         return {}
 
-    cache_keys = {}  # type: Dict[ObjKT, str]
+    cache_keys: Dict[ObjKT, str] = {}
     for object_id in object_ids:
         cache_keys[object_id] = cache_key_function(object_id)
 
-    cached_objects_compressed = safe_cache_get_many([cache_keys[object_id]
-                                                     for object_id in object_ids])  # type: Dict[str, Tuple[CompressedItemT]]
+    cached_objects_compressed: Dict[str, Tuple[CompressedItemT]] = safe_cache_get_many(
+        [cache_keys[object_id] for object_id in object_ids],
+    )
 
-    cached_objects = {}  # type: Dict[str, CacheItemT]
+    cached_objects: Dict[str, CacheItemT] = {}
     for (key, val) in cached_objects_compressed.items():
         cached_objects[key] = extractor(cached_objects_compressed[key][0])
     needed_ids = [object_id for object_id in object_ids if
@@ -396,7 +392,7 @@ def generic_bulk_cached_fetch(
     else:
         db_objects = []
 
-    items_for_remote_cache = {}  # type: Dict[str, Tuple[CompressedItemT]]
+    items_for_remote_cache: Dict[str, Tuple[CompressedItemT]] = {}
     for obj in db_objects:
         key = cache_keys[id_fetcher(obj)]
         item = cache_transformer(obj)
@@ -407,11 +403,44 @@ def generic_bulk_cached_fetch(
     return {object_id: cached_objects[cache_keys[object_id]] for object_id in object_ids
             if cache_keys[object_id] in cached_objects}
 
+def transformed_bulk_cached_fetch(
+    cache_key_function: Callable[[ObjKT], str],
+    query_function: Callable[[List[ObjKT]], Iterable[ItemT]],
+    object_ids: Sequence[ObjKT],
+    *,
+    id_fetcher: Callable[[ItemT], ObjKT],
+    cache_transformer: Callable[[ItemT], CacheItemT],
+) -> Dict[ObjKT, CacheItemT]:
+    return generic_bulk_cached_fetch(
+        cache_key_function,
+        query_function,
+        object_ids,
+        extractor=lambda obj: obj,
+        setter=lambda obj: obj,
+        id_fetcher=id_fetcher,
+        cache_transformer=cache_transformer,
+    )
+
+def bulk_cached_fetch(
+    cache_key_function: Callable[[ObjKT], str],
+    query_function: Callable[[List[ObjKT]], Iterable[ItemT]],
+    object_ids: Sequence[ObjKT],
+    *,
+    id_fetcher: Callable[[ItemT], ObjKT],
+) -> Dict[ObjKT, ItemT]:
+    return transformed_bulk_cached_fetch(
+        cache_key_function,
+        query_function,
+        object_ids,
+        id_fetcher=id_fetcher,
+        cache_transformer=lambda obj: obj,
+    )
+
 def preview_url_cache_key(url: str) -> str:
-    return "preview_url:%s" % (make_safe_digest(url),)
+    return f"preview_url:{make_safe_digest(url)}"
 
 def display_recipient_cache_key(recipient_id: int) -> str:
-    return "display_recipient_dict:%d" % (recipient_id,)
+    return f"display_recipient_dict:{recipient_id}"
 
 def display_recipient_bulk_get_users_by_id_cache_key(user_id: int) -> str:
     # Cache key function for a function for bulk fetching users, used internally
@@ -422,57 +451,64 @@ def user_profile_by_email_cache_key(email: str) -> str:
     # See the comment in zerver/lib/avatar_hash.py:gravatar_hash for why we
     # are proactively encoding email addresses even though they will
     # with high likelihood be ASCII-only for the foreseeable future.
-    return 'user_profile_by_email:%s' % (make_safe_digest(email.strip()),)
+    return f'user_profile_by_email:{make_safe_digest(email.strip())}'
 
 def user_profile_cache_key_id(email: str, realm_id: int) -> str:
-    return "user_profile:%s:%s" % (make_safe_digest(email.strip()), realm_id,)
+    return f"user_profile:{make_safe_digest(email.strip())}:{realm_id}"
 
 def user_profile_cache_key(email: str, realm: 'Realm') -> str:
     return user_profile_cache_key_id(email, realm.id)
 
 def bot_profile_cache_key(email: str) -> str:
-    return "bot_profile:%s" % (make_safe_digest(email.strip()),)
+    return f"bot_profile:{make_safe_digest(email.strip())}"
 
 def user_profile_by_id_cache_key(user_profile_id: int) -> str:
-    return "user_profile_by_id:%s" % (user_profile_id,)
+    return f"user_profile_by_id:{user_profile_id}"
 
 def user_profile_by_api_key_cache_key(api_key: str) -> str:
-    return "user_profile_by_api_key:%s" % (api_key,)
+    return f"user_profile_by_api_key:{api_key}"
 
-realm_user_dict_fields = [
-    'id', 'full_name', 'short_name', 'email',
+realm_user_dict_fields: List[str] = [
+    'id', 'full_name', 'email',
     'avatar_source', 'avatar_version', 'is_active',
     'role', 'is_bot', 'realm_id', 'timezone',
     'date_joined', 'bot_owner_id', 'delivery_email',
-    'bot_type'
-]  # type: List[str]
+    'bot_type', 'long_term_idle'
+]
 
 def realm_user_dicts_cache_key(realm_id: int) -> str:
-    return "realm_user_dicts:%s" % (realm_id,)
+    return f"realm_user_dicts:{realm_id}"
 
 def get_realm_used_upload_space_cache_key(realm: 'Realm') -> str:
-    return 'realm_used_upload_space:%s' % (realm.id,)
+    return f'realm_used_upload_space:{realm.id}'
 
 def active_user_ids_cache_key(realm_id: int) -> str:
-    return "active_user_ids:%s" % (realm_id,)
+    return f"active_user_ids:{realm_id}"
 
 def active_non_guest_user_ids_cache_key(realm_id: int) -> str:
-    return "active_non_guest_user_ids:%s" % (realm_id,)
+    return f"active_non_guest_user_ids:{realm_id}"
 
-bot_dict_fields = ['id', 'full_name', 'short_name', 'bot_type', 'email',
-                   'is_active', 'default_sending_stream__name',
-                   'realm_id',
-                   'default_events_register_stream__name',
-                   'default_all_public_streams', 'api_key',
-                   'bot_owner__email', 'avatar_source',
-                   'avatar_version']  # type: List[str]
+bot_dict_fields: List[str] = [
+    'api_key',
+    'avatar_source',
+    'avatar_version',
+    'bot_owner__id',
+    'bot_type',
+    'default_all_public_streams',
+    'default_events_register_stream__name',
+    'default_sending_stream__name',
+    'email',
+    'full_name',
+    'id',
+    'is_active',
+    'realm_id',
+]
 
 def bot_dicts_in_realm_cache_key(realm: 'Realm') -> str:
-    return "bot_dicts_in_realm:%s" % (realm.id,)
+    return f"bot_dicts_in_realm:{realm.id}"
 
 def get_stream_cache_key(stream_name: str, realm_id: int) -> str:
-    return "stream_by_realm_and_name:%s:%s" % (
-        realm_id, make_safe_digest(stream_name.strip().lower()))
+    return f"stream_by_realm_and_name:{realm_id}:{make_safe_digest(stream_name.strip().lower())}"
 
 def delete_user_profile_caches(user_profiles: Iterable['UserProfile']) -> None:
     # Imported here to avoid cyclic dependency.
@@ -529,19 +565,13 @@ def flush_user_profile(sender: Any, **kwargs: Any) -> None:
     if changed(kwargs, ['role']):
         cache_delete(active_non_guest_user_ids_cache_key(user_profile.realm_id))
 
-    if changed(kwargs, ['email', 'full_name', 'short_name', 'id', 'is_mirror_dummy']):
+    if changed(kwargs, ['email', 'full_name', 'id', 'is_mirror_dummy']):
         delete_display_recipient_cache(user_profile)
 
     # Invalidate our bots_in_realm info dict if any bot has
     # changed the fields in the dict or become (in)active
     if user_profile.is_bot and changed(kwargs, bot_dict_fields):
         cache_delete(bot_dicts_in_realm_cache_key(user_profile.realm))
-
-    # Invalidate realm-wide alert words cache if any user in the realm has changed
-    # alert words
-    if changed(kwargs, ['alert_words']):
-        cache_delete(realm_alert_words_cache_key(user_profile.realm))
-        cache_delete(realm_alert_words_automaton_cache_key(user_profile.realm))
 
 # Called by models.py to flush various caches whenever we save
 # a Realm object.  The main tricky thing here is that Realm info is
@@ -567,16 +597,16 @@ def flush_realm(sender: Any, **kwargs: Any) -> None:
         cache_delete(realm_text_description_cache_key(realm))
 
 def realm_alert_words_cache_key(realm: 'Realm') -> str:
-    return "realm_alert_words:%s" % (realm.string_id,)
+    return f"realm_alert_words:{realm.string_id}"
 
 def realm_alert_words_automaton_cache_key(realm: 'Realm') -> str:
-    return "realm_alert_words_automaton:%s" % (realm.string_id,)
+    return f"realm_alert_words_automaton:{realm.string_id}"
 
 def realm_rendered_description_cache_key(realm: 'Realm') -> str:
-    return "realm_rendered_description:%s" % (realm.string_id,)
+    return f"realm_rendered_description:{realm.string_id}"
 
 def realm_text_description_cache_key(realm: 'Realm') -> str:
-    return "realm_text_description:%s" % (realm.string_id,)
+    return f"realm_text_description:{realm.string_id}"
 
 # Called by models.py to flush the stream cache whenever we save a stream
 # object.
@@ -600,13 +630,13 @@ def flush_used_upload_space_cache(sender: Any, **kwargs: Any) -> None:
         cache_delete(get_realm_used_upload_space_cache_key(attachment.owner.realm))
 
 def to_dict_cache_key_id(message_id: int) -> str:
-    return 'message_dict:%d' % (message_id,)
+    return f'message_dict:{message_id}'
 
-def to_dict_cache_key(message: 'Message') -> str:
+def to_dict_cache_key(message: 'Message', realm_id: Optional[int]=None) -> str:
     return to_dict_cache_key_id(message.id)
 
 def open_graph_description_cache_key(content: Any, request: HttpRequest) -> str:
-    return 'open_graph_description_path:%s' % (make_safe_digest(request.META['PATH_INFO']),)
+    return 'open_graph_description_path:{}'.format(make_safe_digest(request.META['PATH_INFO']))
 
 def flush_message(sender: Any, **kwargs: Any) -> None:
     message = kwargs['instance']
@@ -636,7 +666,9 @@ def ignore_unhashable_lru_cache(maxsize: int=128, typed: bool=False) -> DECORATO
             # In the development environment, we want every file
             # change to refresh the source files from disk.
             return user_function
-        cache_enabled_user_function = internal_decorator(user_function)
+
+        # Casting to Any since we're about to monkey-patch this.
+        cache_enabled_user_function = cast(Any, internal_decorator(user_function))
 
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             if not hasattr(cache_enabled_user_function, 'key_prefix'):

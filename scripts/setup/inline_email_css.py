@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import os
-
-from premailer import Premailer
-from cssutils import profile
-from cssutils.profiles import Profiles, properties, macros
 from typing import Set
+
+from cssutils import profile
+from cssutils.profiles import Profiles, macros, properties
+from premailer import Premailer
 
 ZULIP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../')
 EMAIL_TEMPLATES_PATH = os.path.join(ZULIP_PATH, 'templates', 'zerver', 'emails')
@@ -25,16 +25,16 @@ def configure_cssutils() -> None:
                                                           r'visible|painted|fill|stroke|all|inherit')
 
     profile.addProfiles([(Profiles.CSS_LEVEL_2, properties[Profiles.CSS_LEVEL_2],
-                         macros[Profiles.CSS_LEVEL_2])])
+                          macros[Profiles.CSS_LEVEL_2])])
 configure_cssutils()
 
 def inline_template(template_source_name: str) -> None:
-    os.makedirs(COMPILED_EMAIL_TEMPLATES_PATH, exist_ok=True)
-
     template_name = template_source_name.split('.source.html')[0]
-    compiled_template_path = os.path.join(COMPILED_EMAIL_TEMPLATES_PATH,
-                                          template_name + ".html")
     template_path = os.path.join(EMAIL_TEMPLATES_PATH, template_source_name)
+    compiled_template_path = os.path.join(os.path.dirname(template_path), "compiled",
+                                          os.path.basename(template_name) + ".html")
+
+    os.makedirs(os.path.dirname(compiled_template_path), exist_ok=True)
 
     with open(template_path) as template_source_file:
         template_str = template_source_file.read()
@@ -78,7 +78,7 @@ def strip_unnecesary_tags(text: str) -> str:
         text = text[start:end]
         return text
     else:
-        raise ValueError("Template does not have %s or %s" % (start_block, end_block))
+        raise ValueError(f"Template does not have {start_block} or {end_block}")
 
 def get_all_templates_from_directory(directory: str) -> Set[str]:
     result = set()

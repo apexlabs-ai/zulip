@@ -11,6 +11,7 @@ largest and fastest growing open source group chat project.
 [![CircleCI branch](https://img.shields.io/circleci/project/github/zulip/zulip/master.svg)](https://circleci.com/gh/zulip/zulip/tree/master)
 [![Coverage Status](https://img.shields.io/codecov/c/github/zulip/zulip/master.svg)](https://codecov.io/gh/zulip/zulip/branch/master)
 [![Mypy coverage](https://img.shields.io/badge/mypy-100%25-green.svg)][mypy-coverage]
+[![code style: prettier](https://img.shields.io/badge/code_style-prettier-ff69b4.svg)](https://github.com/prettier/prettier)
 [![GitHub release](https://img.shields.io/github/release/zulip/zulip.svg)](https://github.com/zulip/zulip/releases/latest)
 [![docs](https://readthedocs.org/projects/zulip/badge/?version=latest)](https://zulip.readthedocs.io/en/latest/)
 [![Zulip chat](https://img.shields.io/badge/zulip-join_chat-brightgreen.svg)](https://chat.zulip.org)
@@ -34,7 +35,7 @@ You might be interested in:
   [beginner-friendly issues][beginner-friendly].
 
 * **Contributing non-code**.
-  [Report an issue](https://zulip.readthedocs.io/en/latest/overview/contributing.html#reporting-issue),
+  [Report an issue](https://zulip.readthedocs.io/en/latest/overview/contributing.html#reporting-issues),
   [translate](https://zulip.readthedocs.io/en/latest/translating/translating.html) Zulip
   into your language,
   [write](https://zulip.readthedocs.io/en/latest/overview/contributing.html#zulip-outreach)
@@ -51,17 +52,17 @@ You might be interested in:
   the
   [Zulip community server](https://zulip.readthedocs.io/en/latest/contributing/chat-zulip-org.html). We
   also recommend reading Zulip for
-  [open source](https://zulipchat.com/for/open-source/), Zulip for
-  [companies](https://zulipchat.com/for/companies/), or Zulip for
-  [working groups and part time communities](https://zulipchat.com/for/working-groups-and-communities/).
+  [open source](https://zulip.com/for/open-source/), Zulip for
+  [companies](https://zulip.com/for/companies/), or Zulip for
+  [working groups and part time communities](https://zulip.com/for/working-groups-and-communities/).
 
-* **Running a Zulip server**. Use a preconfigured [Digital Ocean droplet](https://marketplace.digitalocean.com/apps/zulip),
+* **Running a Zulip server**. Use a preconfigured [DigitalOcean droplet](https://marketplace.digitalocean.com/apps/zulip),
   [install Zulip](https://zulip.readthedocs.io/en/stable/production/install.html)
   directly, or use Zulip's
   experimental [Docker image](https://zulip.readthedocs.io/en/latest/production/deployment.html#zulip-in-docker).
-  Commercial support is available; see <https://zulipchat.com/plans> for details.
+  Commercial support is available; see <https://zulip.com/plans> for details.
 
-* **Using Zulip without setting up a server**. <https://zulipchat.com>
+* **Using Zulip without setting up a server**. <https://zulip.com>
   offers free and commercial hosting, including providing our paid
   plan for free to fellow open source projects.
 
@@ -70,7 +71,7 @@ You might be interested in:
   like Google Summer of Code.
 
 You may also be interested in reading our [blog](https://blog.zulip.org/) or
-following us on [twitter](https://twitter.com/zulip).
+following us on [Twitter](https://twitter.com/zulip).
 Zulip is distributed under the
 [Apache 2.0](https://github.com/zulip/zulip/blob/master/LICENSE) license.
 

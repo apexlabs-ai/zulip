@@ -1,6 +1,6 @@
 # Customize Zulip
 
-Once you've got Zulip setup, you'll likely want to configure it the
+Once you've got Zulip set up, you'll likely want to configure it the
 way you like.
 
 ## Making changes
@@ -9,7 +9,7 @@ Most configuration can be done by a realm administrator, on the web.
 For those settings, see [the documentation for realm
 administrators][realm-admin-docs].
 
-[realm-admin-docs]: https://zulipchat.com/help/getting-your-organization-started-with-zulip
+[realm-admin-docs]: https://zulip.com/help/getting-your-organization-started-with-zulip
 
 This page discusses additional configuration that a system
 administrator can do.  To change any of the following settings, edit
@@ -21,7 +21,7 @@ su zulip -c '/home/zulip/deployments/current/scripts/restart-server'
 
 ## Specific settings
 
-### Domain and Email settings
+### Domain and email settings
 
 `EXTERNAL_HOST`: the user-accessible domain name for your Zulip
 installation (i.e., what users will type in their web browser). This
@@ -34,7 +34,7 @@ maintaining this installation and who will get support and error
 emails.  If you passed `--email` to the installer, this will be
 prefilled with that value.
 
-### Authentication Backends
+### Authentication backends
 
 `AUTHENTICATION_BACKENDS`: Zulip supports a wide range of popular
 options for authenticating users to your server, including Google
@@ -100,6 +100,7 @@ Some popular settings in `/etc/zulip/settings.py` include:
   tweets.
 * The [email gateway](../production/email-gateway.md), which lets
   users send emails into Zulip.
+* The [Zoom video call integration](zoom-configuration.md).
 
 ## Zulip announcement list
 

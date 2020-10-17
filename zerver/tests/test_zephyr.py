@@ -1,12 +1,13 @@
-import ujson
-
-from django.http import HttpResponse
-from mock import patch
+import subprocess
 from typing import Any
+from unittest.mock import patch
+
+import orjson
+from django.http import HttpResponse
 
 from zerver.lib.test_classes import ZulipTestCase
 from zerver.lib.users import get_api_key
-from zerver.models import get_user, get_realm
+from zerver.models import get_realm, get_user
 
 
 class ZephyrTest(ZulipTestCase):
@@ -15,7 +16,7 @@ class ZephyrTest(ZulipTestCase):
         self.login_user(user)
 
         def post(subdomain: Any, **kwargs: Any) -> HttpResponse:
-            params = {k: ujson.dumps(v) for k, v in kwargs.items()}
+            params = {k: orjson.dumps(v).decode() for k, v in kwargs.items()}
             return self.client_post('/accounts/webathena_kerberos_login/', params,
                                     subdomain=subdomain)
 
@@ -51,12 +52,12 @@ class ZephyrTest(ZulipTestCase):
 
         with \
                 ccache_mock(return_value=b'1234'), \
-                ssh_mock(side_effect=KeyError('foo')), \
+                ssh_mock(side_effect=subprocess.CalledProcessError(1, [])), \
                 logging_mock() as log:
             result = post("zephyr", cred=cred)
 
         self.assert_json_error(result, 'We were unable to setup mirroring for you')
-        log.assert_called_with("Error updating the user's ccache")
+        log.assert_called_with("Error updating the user's ccache", stack_info=True)
 
         with ccache_mock(return_value=b'1234'), mirror_mock(), ssh_mock() as ssh:
             result = post("zephyr", cred=cred)
@@ -66,10 +67,7 @@ class ZephyrTest(ZulipTestCase):
             'ssh',
             'server',
             '--',
-            '/home/zulip/python-zulip-api/zulip/integrations/zephyr/process_ccache',
-            'starnine',
-            api_key,
-            'MTIzNA=='])
+            f'/home/zulip/python-zulip-api/zulip/integrations/zephyr/process_ccache starnine {api_key} MTIzNA=='])
 
         # Accounts whose Kerberos usernames are known not to match their
         # zephyr accounts are hardcoded, and should be handled properly.
@@ -92,7 +90,4 @@ class ZephyrTest(ZulipTestCase):
             'ssh',
             'server',
             '--',
-            '/home/zulip/python-zulip-api/zulip/integrations/zephyr/process_ccache',
-            'starnine',
-            api_key,
-            'MTIzNA=='])
+            f'/home/zulip/python-zulip-api/zulip/integrations/zephyr/process_ccache starnine {api_key} MTIzNA=='])

@@ -1,37 +1,29 @@
 import base64
-import dateutil
 import glob
-import hypchat
 import logging
 import os
 import re
 import shutil
 import subprocess
-import ujson
-
 from typing import Any, Callable, Dict, List, Optional, Set
 
+import dateutil
+import hypchat
+import orjson
 from django.conf import settings
 from django.utils.timezone import now as timezone_now
 
-from zerver.lib.utils import (
-    process_list_in_batches,
-)
-
-from zerver.models import (
-    RealmEmoji,
-    Recipient,
-    UserProfile,
-)
-
+from zerver.data_import.hipchat_attachment import AttachmentHandler
+from zerver.data_import.hipchat_user import UserHandler
 from zerver.data_import.import_util import (
+    SubscriberHandler,
     build_message,
+    build_personal_subscriptions,
+    build_public_stream_subscriptions,
     build_realm,
     build_realm_emoji,
     build_recipients,
     build_stream,
-    build_personal_subscriptions,
-    build_public_stream_subscriptions,
     build_stream_subscriptions,
     build_user_profile,
     build_zerver_realm,
@@ -39,12 +31,10 @@ from zerver.data_import.import_util import (
     make_subscriber_map,
     make_user_messages,
     write_avatar_png,
-    SubscriberHandler,
 )
-
-from zerver.data_import.hipchat_attachment import AttachmentHandler
-from zerver.data_import.hipchat_user import UserHandler
 from zerver.data_import.sequencer import NEXT_ID, IdMapper
+from zerver.lib.utils import process_list_in_batches
+from zerver.models import RealmEmoji, Recipient, UserProfile
 
 # stubs
 ZerverFieldsT = Dict[str, Any]
@@ -70,22 +60,22 @@ def untar_input_file(tar_file: str) -> str:
     data_dir = os.path.abspath(data_dir)
 
     if os.path.exists(data_dir):
-        logging.info('input data was already untarred to %s, we will use it' % (data_dir,))
+        logging.info('input data was already untarred to %s, we will use it', data_dir)
         return data_dir
 
     os.makedirs(data_dir)
 
     subprocess.check_call(['tar', '-xf', tar_file, '-C', data_dir])
 
-    logging.info('input data was untarred to %s' % (data_dir,))
+    logging.info('input data was untarred to %s', data_dir)
 
     return data_dir
 
 def read_user_data(data_dir: str) -> List[ZerverFieldsT]:
     fn = 'users.json'
     data_file = os.path.join(data_dir, fn)
-    with open(data_file) as fp:
-        return ujson.load(fp)
+    with open(data_file, "rb") as fp:
+        return orjson.loads(fp.read())
 
 def convert_user_data(user_handler: UserHandler,
                       slim_mode: bool,
@@ -119,12 +109,12 @@ def convert_user_data(user_handler: UserHandler,
             if role == UserProfile.ROLE_GUEST:
                 # Hipchat guest users don't have emails, so
                 # we just fake them.
-                email = 'guest-{id}@example.com'.format(id=id)
+                email = f'guest-{id}@example.com'
                 delivery_email = email
             else:
                 # Hipchat sometimes doesn't export an email for deactivated users.
                 assert not is_active
-                email = delivery_email = "deactivated-{id}@example.com".format(id=id)
+                email = delivery_email = f"deactivated-{id}@example.com"
 
         # unmapped fields:
         #    title - Developer, Project Manager, etc.
@@ -202,8 +192,8 @@ def convert_avatar_data(avatar_folder: str,
 def read_room_data(data_dir: str) -> List[ZerverFieldsT]:
     fn = 'rooms.json'
     data_file = os.path.join(data_dir, fn)
-    with open(data_file) as f:
-        data = ujson.load(f)
+    with open(data_file, "rb") as f:
+        data = orjson.loads(f.read())
     return data
 
 def convert_room_data(raw_data: List[ZerverFieldsT],
@@ -244,11 +234,11 @@ def convert_room_data(raw_data: List[ZerverFieldsT],
         )
 
         if invite_only:
-            users = {
+            users: Set[int] = {
                 user_id_mapper.get(key)
                 for key in in_dict['members']
                 if user_id_mapper.has(key)
-            }  # type: Set[int]
+            }
 
             if user_id_mapper.has(in_dict['owner']):
                 owner = user_id_mapper.get(in_dict['owner'])
@@ -359,8 +349,8 @@ def write_emoticon_data(realm_id: int,
         logging.warning("As a result, custom emoji cannot be imported.")
         return []
 
-    with open(data_file) as f:
-        data = ujson.load(f)
+    with open(data_file, "rb") as f:
+        data = orjson.loads(f.read())
 
     if isinstance(data, dict) and 'Emoticons' in data:
         # Handle the hc-migrate export format for emoticons.json.
@@ -534,7 +524,7 @@ def get_hipchat_sender_id(realm_id: int,
             return None
         mirror_user = user_handler.get_mirror_user(
             realm_id=realm_id,
-            name=message_dict['sender']['name']
+            name=message_dict['sender']['name'],
         )
         sender_id = mirror_user['id']
         return sender_id
@@ -544,7 +534,7 @@ def get_hipchat_sender_id(realm_id: int,
             return None
         mirror_user = user_handler.get_mirror_user(
             realm_id=realm_id,
-            name=message_dict['sender']['id']
+            name=message_dict['sender']['id'],
         )
         sender_id = mirror_user['id']
         return sender_id
@@ -571,8 +561,8 @@ def process_message_file(realm_id: int,
                          attachment_handler: AttachmentHandler) -> None:
 
     def get_raw_messages(fn: str) -> List[ZerverFieldsT]:
-        with open(fn) as f:
-            data = ujson.load(f)
+        with open(fn, "rb") as f:
+            data = orjson.loads(f.read())
 
         flat_data = [
             d[message_key]
@@ -671,7 +661,7 @@ def process_raw_message_batch(realm_id: int,
         content = content.replace('@here', '@**all**')
         return content
 
-    mention_map = dict()  # type: Dict[int, Set[int]]
+    mention_map: Dict[int, Set[int]] = {}
 
     zerver_message = []
 
@@ -696,7 +686,7 @@ def process_raw_message_batch(realm_id: int,
         content = h.handle(content)
 
         if len(content) > 10000:
-            logging.info('skipping too-long message of length %s' % (len(content),))
+            logging.info('skipping too-long message of length %s', len(content))
             continue
 
         date_sent = raw_message['date_sent']
@@ -755,7 +745,7 @@ def process_raw_message_batch(realm_id: int,
     )
 
     dump_file_id = NEXT_ID('dump_file_id')
-    message_file = "/messages-%06d.json" % (dump_file_id,)
+    message_file = f"/messages-{dump_file_id:06}.json"
     create_converted_data_files(message_json, output_dir, message_file)
 
 def do_convert_data(input_tar_file: str,
@@ -807,7 +797,7 @@ def do_convert_data(input_tar_file: str,
 
     if api_token is None:
         if slim_mode:
-            public_stream_subscriptions = []  # type: List[ZerverFieldsT]
+            public_stream_subscriptions: List[ZerverFieldsT] = []
         else:
             public_stream_subscriptions = build_public_stream_subscriptions(
                 zerver_userprofile=normal_users,

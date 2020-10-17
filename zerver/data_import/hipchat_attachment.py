@@ -1,17 +1,14 @@
 import logging
-import shutil
 import os
-
-from zerver.data_import.import_util import (
-    build_attachment,
-    create_converted_data_files,
-)
-
+import shutil
 from typing import Any, Dict, List, Optional
+
+from zerver.data_import.import_util import build_attachment, create_converted_data_files
+
 
 class AttachmentHandler:
     def __init__(self) -> None:
-        self.info_dict = dict()  # type: Dict[str, Dict[str, Any]]
+        self.info_dict: Dict[str, Dict[str, Any]] = {}
 
     def handle_message_data(self,
                             realm_id: int,
@@ -42,7 +39,7 @@ class AttachmentHandler:
         target_path = os.path.join(
             str(realm_id),
             'HipChatImportAttachment',
-            path
+            path,
         )
 
         if target_path in self.info_dict:
@@ -57,10 +54,7 @@ class AttachmentHandler:
         size = os.path.getsize(local_fn)
         mtime = os.path.getmtime(local_fn)
 
-        content = '[{name}](/user_uploads/{path})'.format(
-            name=name,
-            path=target_path,
-        )
+        content = f'[{name}](/user_uploads/{target_path})'
 
         info = dict(
             message_ids={message_id},
@@ -77,8 +71,8 @@ class AttachmentHandler:
         return content
 
     def write_info(self, output_dir: str, realm_id: int) -> None:
-        attachments = []  # type: List[Dict[str, Any]]
-        uploads_records = []  # type: List[Dict[str, Any]]
+        attachments: List[Dict[str, Any]] = []
+        uploads_records: List[Dict[str, Any]] = []
 
         def add_attachment(info: Dict[str, Any]) -> None:
             build_attachment(
@@ -133,7 +127,7 @@ class AttachmentHandler:
         os.makedirs(os.path.join(uploads_folder, str(realm_id)), exist_ok=True)
 
         attachment = dict(
-            zerver_attachment=attachments
+            zerver_attachment=attachments,
         )
 
         create_converted_data_files(uploads_records, output_dir, '/uploads/records.json')

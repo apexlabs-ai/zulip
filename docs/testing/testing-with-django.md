@@ -2,7 +2,7 @@
 
 ## Overview
 
-Zulip uses the Django framework for its Python back end.  We
+Zulip uses the Django framework for its Python backend.  We
 use the testing framework from
 [django.test](https://docs.djangoproject.com/en/1.10/topics/testing/)
 to test our code.  We have over a thousand automated tests that verify that
@@ -17,7 +17,7 @@ the design of our software.
 
 If you have worked on other Django projects that use unit testing, you
 will probably find familiar patterns in Zulip's code.  This document
-describes how to write tests for the Zulip back end, with a particular
+describes how to write tests for the Zulip backend, with a particular
 emphasis on areas where we have either wrapped Django's test framework
 or just done things that are kind of unique in Zulip.
 
@@ -37,7 +37,7 @@ There are many command line options for running Zulip tests, such
 as a `--verbose` option.  The
 best way to learn the options is to use the online help:
 
-    ./tools/test-backend -h
+    ./tools/test-backend --help
 
 We also have ways to instrument our tests for finding code coverage,
 URL coverage, and slow tests.  Use the `-h` option to discover these
@@ -106,7 +106,7 @@ influence tests results.)
 Here are some example action methods that tests may use for data setup:
 
 - check_send_message
-- do_change_is_admin
+- do_change_user_role
 - do_create_user
 - do_make_stream_private
 
@@ -298,7 +298,7 @@ A common use is to prevent a call to a third-party service from using
 the Internet; `git grep mock.patch | grep requests` is a good way to
 find several examples of doing this.
 
-## Zulip Testing Philosophy
+## Zulip testing philosophy
 
 If there is one word to describe Zulip's philosophy for writing tests,
 it is probably "flexible."  (Hopefully "thorough" goes without saying.)
@@ -317,7 +317,7 @@ endpoints support a JSON interface.  Regardless of the interface, an
 endpoint test generally follows this pattern:
 
 - Set up the data.
-- Login with `self.login()` or set up an API key.
+- Log in with `self.login()` or set up an API key.
 - Use a Zulip test helper to hit the endpoint.
 - Assert that the result was either a success or failure.
 - Check the data that comes back from the endpoint.
@@ -374,7 +374,7 @@ A detailed description of mocks, along with useful coded snippets, can be found 
 ### Template tests
 
 In [zerver/tests/test_templates.py](https://github.com/zulip/zulip/blob/master/zerver/tests/test_templates.py)
-we have a test that renders all of our back end templates with
+we have a test that renders all of our backend templates with
 a "dummy" context, to make sure the templates don't have obvious
 errors.  (These tests won't catch all types of errors; they are
 just a first line of defense.)
@@ -382,23 +382,23 @@ just a first line of defense.)
 ### SQL performance tests
 
 A common class of bug with Django systems is to handle bulk data in
-an inefficient way, where the back end populates objects for join tables
+an inefficient way, where the backend populates objects for join tables
 with a series of individual queries that give O(N) latency.  (The
 remedy is often just to call `select_related()`, but sometimes it
 requires a more subtle restructuring of the code.)
 
 We try to prevent these bugs in our tests by using a context manager
 called `queries_captured()` that captures the SQL queries used by
-the back end during a particular operation.  We make assertions about
+the backend during a particular operation.  We make assertions about
 those queries, often simply asserting that the number of queries is
 below some threshold.
 
 ### Event-based tests
 
-The Zulip back end has a mechanism where it will fetch initial data
+The Zulip backend has a mechanism where it will fetch initial data
 for a client from the database, and then it will subsequently apply
 some queued up events to that data to the data structure before notifying
-the client.  The `EventsRegisterTest.do_test()` helper helps tests
+the client.  The `BaseAction.do_test()` helper helps tests
 verify that the application of those events via apply_events() produces
 the same data structure as performing an action that generates said event.
 
@@ -435,6 +435,13 @@ requires testing not only the "happy path" but also error handling
 code and edge cases.  It will generate a nice HTML report that you can
 view right from your browser (the tool prints the URL where the report
 is exposed in your development environment).
+
+- **Console output** A properly written test should print nothing to
+the console; use `with self.assertLogs` to capture and verify any
+logging output.  Note that we reconfigure various loggers in
+`zproject/test_extra_settings.py` where the output is unlikely to be
+interesting when running our test suite.  `test-backend
+--ban-console-output` checks for stray print statements.
 
 Note that `test-backend --coverage` will assert that
 various specific files in the project have 100% test coverage and

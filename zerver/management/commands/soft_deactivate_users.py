@@ -6,8 +6,12 @@ from django.conf import settings
 from django.core.management.base import CommandError
 
 from zerver.lib.management import ZulipBaseCommand
-from zerver.lib.soft_deactivation import do_auto_soft_deactivate_users, \
-    do_soft_activate_users, do_soft_deactivate_users, logger
+from zerver.lib.soft_deactivation import (
+    do_auto_soft_deactivate_users,
+    do_soft_activate_users,
+    do_soft_deactivate_users,
+    logger,
+)
 from zerver.models import Realm, UserProfile
 
 
@@ -21,8 +25,11 @@ def get_users_from_emails(emails: List[str],
     if len(users) != len(emails):
         user_emails_found = {user.delivery_email for user in users}
         user_emails_not_found = '\n'.join(set(emails) - user_emails_found)
-        raise CommandError('Users with the following emails were not found:\n\n%s\n\n'
-                           'Check if they are correct.' % (user_emails_not_found,))
+        raise CommandError(
+            'Users with the following emails were not found:\n\n'
+            f'{user_emails_not_found}\n\n'
+            'Check if they are correct.',
+        )
     return users
 
 class Command(ZulipBaseCommand):
@@ -31,20 +38,16 @@ class Command(ZulipBaseCommand):
     def add_arguments(self, parser: ArgumentParser) -> None:
         self.add_realm_args(parser)
         parser.add_argument('-d', '--deactivate',
-                            dest='deactivate',
                             action='store_true',
-                            default=False,
                             help='Used to deactivate user/users.')
         parser.add_argument('-a', '--activate',
-                            dest='activate',
                             action='store_true',
-                            default=False,
                             help='Used to activate user/users.')
         parser.add_argument('--inactive-for',
                             type=int,
                             default=28,
                             help='Number of days of inactivity before soft-deactivation')
-        parser.add_argument('users', metavar='<users>', type=str, nargs='*', default=[],
+        parser.add_argument('users', metavar='<users>', nargs='*',
                             help="A list of user emails to soft activate/deactivate.")
 
     def handle(self, *args: Any, **options: Any) -> None:
@@ -57,7 +60,7 @@ class Command(ZulipBaseCommand):
         activate = options['activate']
         deactivate = options['deactivate']
 
-        filter_kwargs = {}  # type: Dict[str, Realm]
+        filter_kwargs: Dict[str, Realm] = {}
         if realm is not None:
             filter_kwargs = dict(realm=realm)
 
@@ -69,7 +72,7 @@ class Command(ZulipBaseCommand):
 
             users_to_activate = get_users_from_emails(user_emails, filter_kwargs)
             users_activated = do_soft_activate_users(users_to_activate)
-            logger.info('Soft Reactivated %d user(s)' % (len(users_activated),))
+            logger.info('Soft Reactivated %d user(s)', len(users_activated))
 
         elif deactivate:
             if user_emails:
@@ -79,7 +82,7 @@ class Command(ZulipBaseCommand):
             else:
                 users_deactivated = do_auto_soft_deactivate_users(int(options['inactive_for']),
                                                                   realm)
-            logger.info('Soft Deactivated %d user(s)' % (len(users_deactivated),))
+            logger.info('Soft Deactivated %d user(s)', len(users_deactivated))
 
         else:
             self.print_help("./manage.py", "soft_deactivate_users")

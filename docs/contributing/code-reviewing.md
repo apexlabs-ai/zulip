@@ -72,8 +72,8 @@ this?". Good choices include
   to the commit hash or the Detail links on a pull request. (Example:
   in [#10618](https://github.com/zulip/zulip/pull/10618), browse to
   bottom and click the red X next to `c6044ee` to see the build jobs
-  for that commit. You can see that there are 4 build jobs in total.
-  3 are by CircleCI and 1 is by Travis CI. You can see what caused
+  for that commit. You can see that there are 5 build jobs in total.
+  All the 5 jobs run in CircleCI. You can see what caused
   the job to fail by clicking on the failed job. This will open
   up a page in the CI that has more details on why the job failed.
   For example [this](https://circleci.com/gh/zulip/zulip/16617)
@@ -104,7 +104,7 @@ this?". Good choices include
   user input, and potential bugs that are likely for the type of
   change being made.  Tests that exclude whole classes of potential
   bugs are preferred when possible (e.g., the common test suite
-  `test_bugdown.py` between the Zulip server's [frontend and backend
+  `test_markdown.py` between the Zulip server's [frontend and backend
   Markdown processors](../subsystems/markdown.md), or the `GetEventsTest` test for
   buggy race condition handling).
 
@@ -183,7 +183,7 @@ feel free to do that in a new commit, then push your branch to GitHub
 and mention the branch in a comment on the pull request. That'll save
 the maintainer time and get the PR merged quicker.
 
-## Additional Resources
+## Additional resources
 
 We also strongly recommend reviewers to go through the following resources.
 
@@ -194,7 +194,7 @@ We also strongly recommend reviewers to go through the following resources.
 * [Code Review - A consolidation of advice and stuff from the
    sinternet](https://gist.github.com/porterjamesj/002fb27dd70df003646df46f15e898de)
   article by James J. Porter
-* [Zulip Code of Conduct](../code-of-conduct.md)
+* [Zulip code of conduct](../code-of-conduct.md)
 
 [code-style]: ../contributing/code-style.md
 [commit-messages]: ../contributing/version-control.html#commit-messages

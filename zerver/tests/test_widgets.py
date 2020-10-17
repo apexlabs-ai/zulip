@@ -1,19 +1,20 @@
-import ujson
+import re
+from typing import Any, Dict
 
-from typing import Dict, Any
-
-from zerver.models import SubMessage
+import orjson
+from django.core.exceptions import ValidationError
 
 from zerver.lib.test_classes import ZulipTestCase
-
-from zerver.lib.widget import get_widget_data
-
 from zerver.lib.validator import check_widget_content
+from zerver.lib.widget import get_widget_data
+from zerver.models import SubMessage
+
 
 class WidgetContentTestCase(ZulipTestCase):
     def test_validation(self) -> None:
         def assert_error(obj: object, msg: str) -> None:
-            self.assertEqual(check_widget_content(obj), msg)
+            with self.assertRaisesRegex(ValidationError, re.escape(msg)):
+                check_widget_content(obj)
 
         assert_error(5,
                      'widget_content is not a dict')
@@ -30,7 +31,7 @@ class WidgetContentTestCase(ZulipTestCase):
         assert_error(dict(widget_type='bogus', extra_data={}),
                      'unknown widget type: bogus')
 
-        extra_data = dict()  # type: Dict[str, Any]
+        extra_data: Dict[str, Any] = {}
         obj = dict(widget_type='zform', extra_data=extra_data)
 
         assert_error(obj, 'zform is missing type field')
@@ -59,7 +60,7 @@ class WidgetContentTestCase(ZulipTestCase):
             dict(short_name='a', long_name='foo', reply='bar'),
         ]
 
-        self.assertEqual(check_widget_content(obj), None)
+        check_widget_content(obj)
 
     def test_message_error_handling(self) -> None:
         sender = self.example_user('cordelia')
@@ -78,7 +79,7 @@ class WidgetContentTestCase(ZulipTestCase):
         self.assert_json_error_contains(result, 'Widgets: API programmer sent invalid JSON')
 
         bogus_data = dict(color='red', foo='bar', x=2)
-        payload['widget_content'] = ujson.dumps(bogus_data)
+        payload['widget_content'] = orjson.dumps(bogus_data).decode()
         result = self.api_post(sender, "/api/v1/messages", payload)
         self.assert_json_error_contains(result, 'Widgets: widget_type is not in widget_content')
 
@@ -115,12 +116,12 @@ class WidgetContentTestCase(ZulipTestCase):
             choices=[],
         )
 
-        widget_content = ujson.dumps(
-            dict(
-                widget_type='zform',
-                extra_data=zform_data,
-            ),
+        widget_content = dict(
+            widget_type='zform',
+            extra_data=zform_data,
         )
+
+        check_widget_content(widget_content)
 
         payload = dict(
             type="stream",
@@ -128,7 +129,7 @@ class WidgetContentTestCase(ZulipTestCase):
             client='test suite',
             topic='whatever',
             content=content,
-            widget_content=widget_content,
+            widget_content=orjson.dumps(widget_content).decode(),
         )
         result = self.api_post(sender, "/api/v1/messages", payload)
         self.assert_json_success(result)
@@ -143,7 +144,7 @@ class WidgetContentTestCase(ZulipTestCase):
 
         submessage = SubMessage.objects.get(message_id=message.id)
         self.assertEqual(submessage.msg_type, 'widget')
-        self.assertEqual(ujson.loads(submessage.content), expected_submessage_content)
+        self.assertEqual(orjson.loads(submessage.content), expected_submessage_content)
 
     def test_tictactoe(self) -> None:
         # The tictactoe widget is mostly useful as a code sample,
@@ -174,7 +175,7 @@ class WidgetContentTestCase(ZulipTestCase):
 
         submessage = SubMessage.objects.get(message_id=message.id)
         self.assertEqual(submessage.msg_type, 'widget')
-        self.assertEqual(ujson.loads(submessage.content), expected_submessage_content)
+        self.assertEqual(orjson.loads(submessage.content), expected_submessage_content)
 
     def test_poll_command_extra_data(self) -> None:
         sender = self.example_user('cordelia')
@@ -206,7 +207,7 @@ class WidgetContentTestCase(ZulipTestCase):
 
         submessage = SubMessage.objects.get(message_id=message.id)
         self.assertEqual(submessage.msg_type, 'widget')
-        self.assertEqual(ujson.loads(submessage.content), expected_submessage_content)
+        self.assertEqual(orjson.loads(submessage.content), expected_submessage_content)
 
         # Now don't supply a question.
 
@@ -227,4 +228,4 @@ class WidgetContentTestCase(ZulipTestCase):
         self.assertEqual(message.content, content)
         submessage = SubMessage.objects.get(message_id=message.id)
         self.assertEqual(submessage.msg_type, 'widget')
-        self.assertEqual(ujson.loads(submessage.content), expected_submessage_content)
+        self.assertEqual(orjson.loads(submessage.content), expected_submessage_content)

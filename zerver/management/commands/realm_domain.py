@@ -15,16 +15,12 @@ class Command(ZulipBaseCommand):
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument('--op',
-                            dest='op',
-                            type=str,
                             default="show",
                             help='What operation to do (add, show, remove).')
         parser.add_argument('--allow-subdomains',
-                            dest='allow_subdomains',
                             action="store_true",
-                            default=False,
                             help='Whether subdomains are allowed or not.')
-        parser.add_argument('domain', metavar='<domain>', type=str, nargs='?',
+        parser.add_argument('domain', metavar='<domain>', nargs='?',
                             help="domain to add or remove")
         self.add_realm_args(parser, True)
 
@@ -32,7 +28,7 @@ class Command(ZulipBaseCommand):
         realm = self.get_realm(options)
         assert realm is not None  # Should be ensured by parser
         if options["op"] == "show":
-            print("Domains for %s:" % (realm.string_id,))
+            print(f"Domains for {realm.string_id}:")
             for realm_domain in get_realm_domains(realm):
                 if realm_domain["allow_subdomains"]:
                     print(realm_domain["domain"] + " (subdomains allowed)")
@@ -51,8 +47,8 @@ class Command(ZulipBaseCommand):
                                            allow_subdomains=options["allow_subdomains"])
                 sys.exit(0)
             except IntegrityError:
-                raise CommandError("The domain %(domain)s is already a part "
-                                   "of your organization." % {'domain': domain})
+                raise CommandError(f"The domain {domain} is already a part "
+                                   "of your organization.")
         elif options["op"] == "remove":
             try:
                 RealmDomain.objects.get(realm=realm, domain=domain).delete()

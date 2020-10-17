@@ -1,15 +1,14 @@
 import json
 import re
-import scrapy
+from typing import Callable, Iterator, List, Optional, Union
 
+import scrapy
 from scrapy.http import Request, Response
 from scrapy.linkextractors import IGNORED_EXTENSIONS
 from scrapy.linkextractors.lxmlhtml import LxmlLinkExtractor
 from scrapy.spidermiddlewares.httperror import HttpError
 from scrapy.utils.url import url_has_any_extension
 from twisted.python.failure import Failure
-
-from typing import Callable, Iterable, List, Optional, Union
 
 EXCLUDED_URLS = [
     # Google calendar returns 404s on HEAD requests unconditionally
@@ -29,7 +28,7 @@ EXCLUDED_URLS = [
     'https://www.udemy.com/course/the-complete-react-native-and-redux-course/',
 ]
 
-VNU_IGNORE = re.compile(r'|'.join([
+VNU_IGNORE = [
     # Real errors that should be fixed.
     r'Duplicate ID “[^”]*”\.',
     r'The first occurrence of ID “[^”]*” was here\.',
@@ -40,16 +39,17 @@ VNU_IGNORE = re.compile(r'|'.join([
 
     # Warnings that are probably less important.
     r'The “type” attribute is unnecessary for JavaScript resources\.',
-]))
+]
+VNU_IGNORE_REGEX = re.compile(r'|'.join(VNU_IGNORE))
 
 
 class BaseDocumentationSpider(scrapy.Spider):
-    name = None  # type: Optional[str]
+    name: Optional[str] = None
     # Exclude domain address.
-    deny_domains = []  # type: List[str]
-    start_urls = []  # type: List[str]
-    deny = []  # type: List[str]
-    file_extensions = ['.' + ext for ext in IGNORED_EXTENSIONS]  # type: List[str]
+    deny_domains: List[str] = []
+    start_urls: List[str] = []
+    deny: List[str] = []
+    file_extensions: List[str] = ['.' + ext for ext in IGNORED_EXTENSIONS]
     tags = ('a', 'area', 'img')
     attrs = ('href', 'src')
 
@@ -63,7 +63,7 @@ class BaseDocumentationSpider(scrapy.Spider):
         self.log(response)
 
     def _is_external_link(self, url: str) -> bool:
-        if "zulip.readthedocs" in url or "zulipchat.com" in url or "zulip.org" in url:
+        if "zulip.readthedocs" in url or "zulip.com" in url or "zulip.org" in url:
             # We want CI to check any links to Zulip sites.
             return False
         if (len(url) > 4 and url[:4] == "file") or ("localhost" in url):
@@ -92,7 +92,7 @@ class BaseDocumentationSpider(scrapy.Spider):
         def callback(response: Response) -> None:
             vnu_out = json.loads(response.text)
             for message in vnu_out['messages']:
-                if not VNU_IGNORE.fullmatch(message['message']):
+                if not VNU_IGNORE_REGEX.fullmatch(message['message']):
                     self.logger.error(
                         '"%s":%d.%d-%d.%d: %s: %s',
                         url,
@@ -106,8 +106,15 @@ class BaseDocumentationSpider(scrapy.Spider):
 
         return callback
 
-    def _make_requests(self, url: str) -> Iterable[Request]:
-        callback = self.parse  # type: Callable[[Response], Optional[Iterable[Request]]]
+    def _make_requests(self, url: str) -> Iterator[Request]:
+        # These URLs are for Zulip's webapp, which with recent changes
+        # can be accessible without login an account.  While we do
+        # crawl documentation served by the webapp (E.g. /help/), we
+        # don't want to crawl the webapp itself, so we exclude these.
+        if url in ['http://localhost:9981/', 'http://localhost:9981'] or url.startswith('http://localhost:9981/#') or url.startswith('http://localhost:9981#'):
+            return
+
+        callback: Callable[[Response], Optional[Iterator[Request]]] = self.parse
         dont_filter = False
         method = 'GET'
         if self._is_external_url(url):
@@ -121,11 +128,11 @@ class BaseDocumentationSpider(scrapy.Spider):
         yield Request(url, method=method, callback=callback, dont_filter=dont_filter,
                       errback=self.error_callback)
 
-    def start_requests(self) -> Iterable[Request]:
+    def start_requests(self) -> Iterator[Request]:
         for url in self.start_urls:
             yield from self._make_requests(url)
 
-    def parse(self, response: Response) -> Iterable[Request]:
+    def parse(self, response: Response) -> Iterator[Request]:
         self.log(response)
 
         if getattr(self, 'validate_html', False):
@@ -143,7 +150,7 @@ class BaseDocumentationSpider(scrapy.Spider):
                                       canonicalize=False).extract_links(response):
             yield from self._make_requests(link.url)
 
-    def retry_request_with_get(self, request: Request) -> Iterable[Request]:
+    def retry_request_with_get(self, request: Request) -> Iterator[Request]:
         request.method = 'GET'
         request.dont_filter = True
         yield request
@@ -151,7 +158,7 @@ class BaseDocumentationSpider(scrapy.Spider):
     def exclude_error(self, url: str) -> bool:
         return url in EXCLUDED_URLS
 
-    def error_callback(self, failure: Failure) -> Optional[Union[Failure, Iterable[Request]]]:
+    def error_callback(self, failure: Failure) -> Optional[Union[Failure, Iterator[Request]]]:
         if failure.check(HttpError):
             response = failure.value.response
             if self.exclude_error(response.url):
@@ -159,6 +166,6 @@ class BaseDocumentationSpider(scrapy.Spider):
             if response.status == 405 and response.request.method == 'HEAD':
                 # Method 'HEAD' not allowed, repeat request with 'GET'
                 return self.retry_request_with_get(response.request)
-            self.logger.error("Please check link: %s", response)
+            self.logger.error("Please check link: %s", response.request.url)
 
         return failure

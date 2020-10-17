@@ -1,11 +1,11 @@
 import re
+from typing import Any, Callable, Dict, Tuple
 
 from django.conf import settings
 from django.utils.text import slugify
 
 from zerver.models import Stream
 
-from typing import Any, Callable, Dict, Tuple
 
 def default_option_handler_factory(address_option: str) -> Callable[[Dict[str, Any]], None]:
     def option_setter(options_dict: Dict[str, Any]) -> None:
@@ -60,7 +60,7 @@ def encode_email_address_helper(name: str, email_token: str, show_sender: bool=F
 
     # If encoded_name ends up empty, we just skip this part of the address:
     if encoded_name:
-        encoded_token = "%s.%s" % (encoded_name, email_token)
+        encoded_token = f"{encoded_name}.{email_token}"
     else:
         encoded_token = email_token
 
@@ -86,7 +86,7 @@ def decode_email_address(email: str) -> Tuple[str, Dict[str, bool]]:
     msg_string = msg_string.replace('.', '+')
 
     parts = msg_string.split('+')
-    options = {}  # type: Dict[str, bool]
+    options: Dict[str, bool] = {}
     for part in parts:
         if part in optional_address_tokens:
             optional_address_tokens[part](options)

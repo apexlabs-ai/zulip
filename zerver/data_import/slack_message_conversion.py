@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict, Tuple, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # stubs
 ZerverFieldsT = Dict[str, Any]
@@ -85,7 +85,7 @@ def convert_to_zulip_markdown(text: str, users: List[ZerverFieldsT],
     # Map Slack channel mention: '<#C5Z73A7RA|general>' to '#**general**'
     for cname, ids in added_channels.items():
         cid = ids[0]
-        text = text.replace('<#%s|%s>' % (cid, cname), '#**' + cname + '**')
+        text = text.replace(f'<#{cid}|{cname}>', '#**' + cname + '**')
 
     tokens = text.split(' ')
     for iterator in range(len(tokens)):
@@ -128,7 +128,7 @@ def get_user_mentions(token: str, users: List[ZerverFieldsT],
             return token, user_id
     return token, None
 
-# Map italic, bold and strikethrough markdown
+# Map italic, bold and strikethrough Markdown
 def convert_markdown_syntax(text: str, regex: str, zulip_keyword: str) -> str:
     """
     Returns:

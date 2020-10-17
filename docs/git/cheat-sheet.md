@@ -1,8 +1,8 @@
-# Git Cheat Sheet
+# Git cheat sheet
 
 See also [fixing commits][fix-commit]
 
-## Common Commands
+## Common commands
 
 - add
     - `git add foo.py`
@@ -53,14 +53,14 @@ See also [fixing commits][fix-commit]
 - status
     - `git status`
 
-## Detailed Cheat Sheet
+## Detailed cheat sheet
 
 - add
     - `git add foo.py`: add `foo.py` to the staging area
     - `git add foo.py bar.py`: add `foo.py` AND `bar.py` to the staging area
     - `git add -u`: Adds all tracked files to the staging area.
 - checkout
-    - `git checkout -b new-branch-name`: create branch `new-branch-name` and switch/checkout to that new branch
+    - `git checkout -b new-branch-name`: create branch `new-branch-name` and switch to/check out that new branch
     - `git checkout master`: switch to your `master` branch
     - `git checkout old-branch-name`: switch to an existing branch `old-branch-name`
 - commit

@@ -3,8 +3,7 @@ import time
 from typing import Any, Callable, Optional
 
 from django.conf import settings
-from django.core.management.base import BaseCommand, CommandError, \
-    CommandParser
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from zerver.lib.rate_limiter import RateLimitedUser, client
 from zerver.models import get_user_profile_by_id
@@ -18,8 +17,6 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument('-t', '--trim',
-                            dest='trim',
-                            default=False,
                             action='store_true',
                             help="Actually trim excess")
 
@@ -32,12 +29,12 @@ class Command(BaseCommand):
 
         age = int(client.ttl(key))
         if age < 0:
-            logging.error("Found key with age of %s, will never expire: %s" % (age, key,))
+            logging.error("Found key with age of %s, will never expire: %s", age, key)
 
         count = count_func()
         if count > max_calls:
             logging.error("Redis health check found key with more elements \
-than max_api_calls! (trying to trim) %s %s" % (key, count))
+than max_api_calls! (trying to trim) %s %s", key, count)
             if trim_func is not None:
                 client.expire(key, entity.max_api_window())
                 trim_func(key, max_calls)
@@ -50,7 +47,9 @@ than max_api_calls! (trying to trim) %s %s" % (key, count))
         wildcard_list = "ratelimit:*:*:list"
         wildcard_zset = "ratelimit:*:*:zset"
 
-        trim_func = lambda key, max_calls: client.ltrim(key, 0, max_calls - 1)  # type: Optional[Callable[[str, int], None]]
+        trim_func: Optional[
+            Callable[[str, int], None]
+        ] = lambda key, max_calls: client.ltrim(key, 0, max_calls - 1)
         if not options['trim']:
             trim_func = None
 

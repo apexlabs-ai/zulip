@@ -1,12 +1,11 @@
-# Requirements and Scalability
+# Requirements and scalability
 
 To run a Zulip server, you will need:
 * A dedicated machine or VM
 * A supported OS:
+  * Ubuntu 20.04 Focal
   * Ubuntu 18.04 Bionic
-  * Ubuntu 16.04 Xenial (deprecated)
   * Debian 10 Buster
-  * Debian 9 Stretch  (deprecated)
 * At least 2GB RAM, and 10GB disk space
   * If you expect 100+ users: 4GB RAM, and 2 CPUs
 * A hostname in DNS
@@ -27,15 +26,13 @@ disregard our advice and use a server that hosts other services, we
 can't support you, but
 [we do have some notes on issues you'll encounter](install-existing-server.md).
 
-#### Operating System
+#### Operating system
 
-Ubuntu 18.04 Bionic, Debian 10 Buster, Ubuntu 16.04 Xenial (deprecated),
-and Debian 9 Stretch (deprecated) are supported for running Zulip in
-production.  64-bit is recommended.  We also recommend installing on
-the newest option you're comfortable with, to save your organization
-the work of upgrading (Ubuntu Trusty [reached end of life in April
-2019][trusty-eol]; Zulip 2.0 was the last major release to support
-it).
+Ubuntu 20.04 Focal, 18.04 Bionic, and Debian 10 Buster are supported
+for running Zulip in production.  64-bit is recommended.  We recommend
+installing on the newest supported OS release you're comfortable with,
+to save a bit of future work [upgrading the operating
+system][upgrade-os].
 
 If you're using Ubuntu, the
 [Ubuntu universe repository][ubuntu-repositories] must be
@@ -46,11 +43,12 @@ sudo add-apt-repository universe
 sudo apt update
 ```
 
+[upgrade-os]: ../production/upgrade-or-modify.html#upgrading-the-operating-system
 [ubuntu-repositories]:
 https://help.ubuntu.com/community/Repositories/Ubuntu
 [enable-universe]: https://help.ubuntu.com/community/Repositories/CommandLine#Adding_the_Universe_and_Multiverse_Repositories
 
-#### Hardware Specifications
+#### Hardware specifications
 
 * CPU and Memory: For installations with 100+ users you'll need a
   minimum of **2 CPUs** and **4GB RAM**. For installations with fewer
@@ -68,7 +66,7 @@ https://help.ubuntu.com/community/Repositories/Ubuntu
 See our [documentation on scalability](#scalability) below for advice
 on hardware requirements for larger organizations.
 
-#### Network and Security Specifications
+#### Network and security specifications
 
 * Incoming HTTPS access (usually port 443, though this is
   [configurable](../production/deployment.html#using-an-alternate-port))
@@ -81,7 +79,7 @@ on hardware requirements for larger organizations.
 * Outgoing HTTP(S) access (ports 80 and 443) to the public Internet so
   that Zulip can properly manage image previews and embeds.  Outgoing
   Internet access is not required if you [disable those
-  features](https://zulipchat.com/help/allow-image-link-previews).
+  features](https://zulip.com/help/allow-image-link-previews).
 * Outgoing SMTP access (usually port 587) to your [SMTP
   server](../production/email.md) so that Zulip can send emails.
 * A domain name (e.g. `zulip.example.com`) that your users will use to
@@ -98,7 +96,7 @@ on hardware requirements for larger organizations.
 
 ## Credentials needed
 
-#### SSL Certificate
+#### SSL certificate
 
 Your Zulip server will need an SSL certificate for the domain name it
 uses.  For most Zulip servers, the recommended (and simplest) way to
@@ -209,11 +207,12 @@ installing Zulip with a dedicated database server.
 
   * Zulip 2.0 and later supports running multiple Tornado servers
     sharded by realm/organization, which is how we scale Zulip Cloud.
-    Contact us for help implementing the sharding policy.
+    [Contact us][contact-support] for help implementing the sharding policy.
 
 Scalability is an area of active development, so if you're unsure
 whether Zulip is a fit for your organization or need further advice
-[contact Zulip support](mailto:support@zulipchat.com).
+[contact Zulip support][contact-support].
 
 [s3-uploads]: ../production/upload-backends.html#s3-backend-configuration
 [streaming-replication]: ../production/export-and-import.html#postgres-streaming-replication
+[contact-support]: https://zulip.com/help/contact-support

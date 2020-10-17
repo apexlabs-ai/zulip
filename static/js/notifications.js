@@ -1,54 +1,59 @@
-const render_compose_notification = require('../templates/compose_notification.hbs');
-const render_notification = require('../templates/notification.hbs');
+"use strict";
+
+const _ = require("lodash");
+
+const render_compose_notification = require("../templates/compose_notification.hbs");
+const render_notification = require("../templates/notification.hbs");
+
+const people = require("./people");
 const settings_config = require("./settings_config");
 
 const notice_memory = new Map();
 
-// When you start Zulip, window_has_focus should be true, but it might not be the
+// When you start Zulip, window_focused should be true, but it might not be the
 // case after a server-initiated reload.
-let window_has_focus = document.hasFocus && document.hasFocus();
+let window_focused = document.hasFocus && document.hasFocus();
 
 let supports_sound;
 
-const unread_pms_favicon = '/static/images/favicon/favicon-pms.png';
+const unread_pms_favicon = "/static/images/favicon/favicon-pms.png?v=4";
 let current_favicon;
 let previous_favicon;
 let flashing = false;
 
-let notifications_api;
+let NotificationAPI;
 
 exports.set_notification_api = function (n) {
-    notifications_api = n;
+    NotificationAPI = n;
 };
 
-if (window.webkitNotifications) {
-    notifications_api = window.webkitNotifications;
-} else if (window.Notification) {
-    // Build a shim to the new notification API
-    notifications_api = {
-        checkPermission: function checkPermission() {
-            if (window.Notification.permission === 'granted') {
-                return 0;
-            }
-            return 2;
-        },
-        requestPermission: window.Notification.requestPermission,
-        createNotification: function createNotification(icon, title, content, tag) {
-            const notification_object = new window.Notification(title, {icon: icon,
-                                                                        body: content,
-                                                                        tag: tag});
-            notification_object.show = function () {};
-            notification_object.cancel = function () { notification_object.close(); };
-            return notification_object;
-        },
-    };
-}
+if (window.electron_bridge && window.electron_bridge.new_notification) {
+    class ElectronBridgeNotification extends EventTarget {
+        constructor(title, options) {
+            super();
+            Object.assign(
+                this,
+                window.electron_bridge.new_notification(title, options, (type, eventInit) =>
+                    this.dispatchEvent(new Event(type, eventInit)),
+                ),
+            );
+        }
 
-function cancel_notification_object(notification_object) {
-    // We must remove the .onclose so that it does not trigger on .cancel
-    notification_object.onclose = function () {};
-    notification_object.onclick = function () {};
-    notification_object.cancel();
+        static get permission() {
+            return Notification.permission;
+        }
+
+        static async requestPermission(callback) {
+            if (callback) {
+                callback(await Promise.resolve(Notification.permission));
+            }
+            return Notification.permission;
+        }
+    }
+
+    NotificationAPI = ElectronBridgeNotification;
+} else if (window.Notification) {
+    NotificationAPI = window.Notification;
 }
 
 exports.get_notifications = function () {
@@ -64,21 +69,22 @@ function get_audio_file_path(audio_element, audio_file_without_extension) {
 }
 
 exports.initialize = function () {
-    $(window).focus(function () {
-        window_has_focus = true;
+    $(window)
+        .on("focus", () => {
+            window_focused = true;
 
-        for (const notice_mem_entry of notice_memory.values()) {
-            cancel_notification_object(notice_mem_entry.obj);
-        }
-        notice_memory.clear();
+            for (const notice_mem_entry of notice_memory.values()) {
+                notice_mem_entry.obj.close();
+            }
+            notice_memory.clear();
 
-        // Update many places on the DOM to reflect unread
-        // counts.
-        unread_ops.process_visible();
-
-    }).blur(function () {
-        window_has_focus = false;
-    });
+            // Update many places on the DOM to reflect unread
+            // counts.
+            unread_ops.process_visible();
+        })
+        .on("blur", () => {
+            window_focused = false;
+        });
 
     const audio = $("<audio>");
     if (audio[0].canPlayType === undefined) {
@@ -96,8 +102,8 @@ exports.initialize = function () {
             source.attr("type", "audio/mpeg");
         }
 
-        const audio_file_without_extension
-            = "/static/audio/notification_sounds/" + page_params.notification_sound;
+        const audio_file_without_extension =
+            "/static/audio/notification_sounds/" + page_params.notification_sound;
         source.attr("src", get_audio_file_path(audio[0], audio_file_without_extension));
     }
 };
@@ -107,8 +113,8 @@ function update_notification_sound_source() {
     // updating the source instead of creating it for the first time.
     const audio = $("#notifications-area audio");
     const source = $("#notifications-area audio source");
-    const audio_file_without_extension
-        = "/static/audio/notification_sounds/" + page_params.notification_sound;
+    const audio_file_without_extension =
+        "/static/audio/notification_sounds/" + page_params.notification_sound;
     source.attr("src", get_audio_file_path(audio[0], audio_file_without_extension));
 
     // Load it so that it is ready to be played; without this the old sound
@@ -117,12 +123,12 @@ function update_notification_sound_source() {
 }
 
 exports.permission_state = function () {
-    if (window.Notification === undefined) {
+    if (NotificationAPI === undefined) {
         // act like notifications are blocked if they do not have access to
         // the notification API.
         return "denied";
     }
-    return window.Notification.permission;
+    return NotificationAPI.permission;
 };
 
 let new_message_count = 0;
@@ -136,10 +142,13 @@ exports.redraw_title = function () {
     // Update window title and favicon to reflect unread messages in current view
     let n;
 
-    const new_title = (new_message_count ? "(" + new_message_count + ") " : "")
-        + narrow.narrow_title + " - "
-        + page_params.realm_name + " - "
-        + "Zulip";
+    const new_title =
+        (new_message_count ? "(" + new_message_count + ") " : "") +
+        narrow.narrow_title +
+        " - " +
+        page_params.realm_name +
+        " - " +
+        "Zulip";
 
     if (document.title === new_title) {
         return;
@@ -154,44 +163,21 @@ exports.redraw_title = function () {
             // Make sure we're working with a number, as a defensive programming
             // measure.  And we don't have images above 99, so display those as
             // 'infinite'.
-            n = +new_message_count;
+            n = Number(new_message_count);
             if (n > 99) {
-                n = 'infinite';
+                n = "infinite";
             }
 
-            current_favicon = previous_favicon = '/static/images/favicon/favicon-' + n + '.png';
+            current_favicon = previous_favicon = "/static/images/favicon/favicon-" + n + ".png?v=4";
         } else {
-            current_favicon = previous_favicon = '/static/favicon.ico?v=2';
+            current_favicon = previous_favicon = "/static/images/favicon.svg?v=4";
         }
         favicon.set(current_favicon);
     }
 
     // Notify the current desktop app's UI about the new unread count.
     if (window.electron_bridge !== undefined) {
-        window.electron_bridge.send_event('total_unread_count', new_message_count);
-    }
-};
-
-exports.show_history_limit_message = function () {
-    $(".top-messages-logo").hide();
-    $(".history-limited-box").show();
-    narrow.hide_empty_narrow_message();
-};
-
-exports.hide_history_limit_message = function () {
-    $(".top-messages-logo").show();
-    $(".history-limited-box").hide();
-};
-
-exports.hide_or_show_history_limit_message = function (msg_list) {
-    if (msg_list !== current_msg_list) {
-        return;
-    }
-
-    if (msg_list.fetch_status.history_limited()) {
-        exports.show_history_limit_message();
-    } else {
-        exports.hide_history_limit_message();
+        window.electron_bridge.send_event("total_unread_count", new_message_count);
     }
 };
 
@@ -226,44 +212,52 @@ exports.update_pm_count = function () {
     }
 };
 
-exports.window_has_focus = function () {
-    return window_has_focus;
+exports.is_window_focused = function () {
+    return window_focused;
 };
 
 function in_browser_notify(message, title, content, raw_operators, opts) {
-    const notification_html = $(render_notification({
-        gravatar_url: people.small_avatar_url(message),
-        title: title,
-        content: content,
-        message_id: message.id,
-    }));
+    const notification_html = $(
+        render_notification({
+            gravatar_url: people.small_avatar_url(message),
+            title,
+            content,
+            message_id: message.id,
+        }),
+    );
 
-    $(".top-right").notify({
-        message: {
-            html: notification_html,
-        },
-        fadeOut: {
-            enabled: true,
-            delay: 4000,
-        },
-    }).show();
+    $(".top-right")
+        .notify({
+            message: {
+                html: notification_html,
+            },
+            fadeOut: {
+                enabled: true,
+                delay: 4000,
+            },
+        })
+        .show();
 
-    $(".notification[data-message-id='" + message.id + "']").expectOne().data("narrow", {
-        raw_operators: raw_operators,
-        opts_notif: opts,
-    });
+    $(".notification[data-message-id='" + message.id + "']")
+        .expectOne()
+        .data("narrow", {
+            raw_operators,
+            opts_notif: opts,
+        });
 }
 
 exports.notify_above_composebox = function (note, link_class, link_msg_id, link_text) {
-    const notification_html = $(render_compose_notification({
-        note: note,
-        link_class: link_class,
-        link_msg_id: link_msg_id,
-        link_text: link_text,
-    }));
+    const notification_html = $(
+        render_compose_notification({
+            note,
+            link_class,
+            link_msg_id,
+            link_text,
+        }),
+    );
     exports.clear_compose_notifications();
-    $('#out-of-view-notification').append(notification_html);
-    $('#out-of-view-notification').show();
+    $("#out-of-view-notification").append(notification_html);
+    $("#out-of-view-notification").show();
 };
 
 if (window.electron_bridge !== undefined) {
@@ -271,37 +265,39 @@ if (window.electron_bridge !== undefined) {
     // is often referred to as inline reply feature. This is done so desktop app doesn't
     // have to depend on channel.post for setting crsf_token and narrow.by_topic
     // to narrow to the message being sent.
-    window.electron_bridge.send_notification_reply_message_supported = true;
-    window.electron_bridge.on_event('send_notification_reply_message', function (message_id, reply) {
+    if (window.electron_bridge.set_send_notification_reply_message_supported !== undefined) {
+        window.electron_bridge.set_send_notification_reply_message_supported(true);
+    }
+    window.electron_bridge.on_event("send_notification_reply_message", (message_id, reply) => {
         const message = message_store.get(message_id);
         const data = {
             type: message.type,
             content: reply,
-            to: message.type === 'private' ? message.reply_to : message.stream,
+            to: message.type === "private" ? message.reply_to : message.stream,
             topic: message.topic,
         };
 
         function success() {
-            if (message.type === 'stream') {
-                narrow.by_topic(message_id, {trigger: 'desktop_notification_reply'});
+            if (message.type === "stream") {
+                narrow.by_topic(message_id, {trigger: "desktop_notification_reply"});
             } else {
-                narrow.by_recipient(message_id, {trigger: 'desktop_notification_reply'});
+                narrow.by_recipient(message_id, {trigger: "desktop_notification_reply"});
             }
         }
 
         function error(error) {
-            window.electron_bridge.send_event('send_notification_reply_message_failed', {
-                data: data,
-                message_id: message_id,
-                error: error,
+            window.electron_bridge.send_event("send_notification_reply_message_failed", {
+                data,
+                message_id,
+                error,
             });
         }
 
         channel.post({
-            url: '/json/messages',
-            data: data,
-            success: success,
-            error: error,
+            url: "/json/messages",
+            data,
+            success,
+            error,
         });
     });
 }
@@ -319,8 +315,9 @@ function process_notification(notification) {
     let raw_operators = [];
     const opts = {trigger: "notification click"};
     // Convert the content to plain text, replacing emoji with their alt text
-    content = $('<div/>').html(message.content);
+    content = $("<div/>").html(message.content);
     ui.replace_emoji_with_text(content);
+    spoilers.hide_spoilers_in_notification(content);
     content = content.text();
 
     const topic = message.topic;
@@ -329,9 +326,11 @@ function process_notification(notification) {
         content = message.sender_full_name + content.slice(3);
     }
 
-    if (message.type === "private") {
-        if (page_params.pm_content_in_desktop_notifications !== undefined
-            && !page_params.pm_content_in_desktop_notifications) {
+    if (message.type === "private" || message.type === "test-notification") {
+        if (
+            page_params.pm_content_in_desktop_notifications !== undefined &&
+            !page_params.pm_content_in_desktop_notifications
+        ) {
             content = "New private message from " + message.sender_full_name;
         }
         key = message.display_reply_to;
@@ -339,16 +338,15 @@ function process_notification(notification) {
         // Remove the sender from the list of other recipients
         other_recipients = other_recipients.replace(", " + message.sender_full_name, "");
         other_recipients = other_recipients.replace(message.sender_full_name + ", ", "");
-        notification_source = 'pm';
+        notification_source = "pm";
     } else {
-        key = message.sender_full_name + " to " +
-              message.stream + " > " + topic;
+        key = message.sender_full_name + " to " + message.stream + " > " + topic;
         if (message.mentioned) {
-            notification_source = 'mention';
+            notification_source = "mention";
         } else if (message.alerted) {
-            notification_source = 'alert';
+            notification_source = "alert";
         } else {
-            notification_source = 'stream';
+            notification_source = "stream";
         }
     }
     blueslip.debug("Desktop notification from source " + notification_source);
@@ -356,11 +354,11 @@ function process_notification(notification) {
     if (content.length > 150) {
         // Truncate content at a word boundary
         for (i = 150; i > 0; i -= 1) {
-            if (content[i] === ' ') {
+            if (content[i] === " ") {
                 break;
             }
         }
-        content = content.substring(0, i);
+        content = content.slice(0, i);
         content += " [...]";
     }
 
@@ -368,7 +366,7 @@ function process_notification(notification) {
         msg_count = notice_memory.get(key).msg_count + 1;
         title = msg_count + " messages from " + title;
         notification_object = notice_memory.get(key).obj;
-        cancel_notification_object(notification_object);
+        notification_object.close();
     }
 
     if (message.type === "private") {
@@ -377,8 +375,7 @@ function process_notification(notification) {
             if (content.length + title.length + other_recipients.length > 230) {
                 // Then count how many people are in the conversation and summarize
                 // by saying the conversation is with "you and [number] other people"
-                other_recipients = other_recipients.replace(/[^,]/g, "").length +
-                                   " other people";
+                other_recipients = other_recipients.replace(/[^,]/g, "").length + " other people";
             }
 
             title += " (to you and " + other_recipients + ")";
@@ -397,43 +394,35 @@ function process_notification(notification) {
         ];
     }
 
-    // Firefox on Ubuntu claims to do webkitNotifications but its notifications are terrible
-    if (notification.desktop_notify && /webkit/i.test(navigator.userAgent)) {
+    if (notification.desktop_notify) {
         const icon_url = people.small_avatar_url(message);
-        notification_object =
-            notifications_api.createNotification(icon_url, title, content, message.id);
+        notification_object = new NotificationAPI(title, {
+            icon: icon_url,
+            body: content,
+            tag: message.id,
+        });
         notice_memory.set(key, {
             obj: notification_object,
-            msg_count: msg_count,
+            msg_count,
             message_id: message.id,
         });
-        notification_object.onclick = function () {
-            notification_object.cancel();
-            narrow.by_topic(message.id, {trigger: 'notification'});
-            window.focus();
-        };
-        notification_object.onclose = function () {
-            notice_memory.delete(key);
-        };
-        notification_object.show();
-    } else if (notification.desktop_notify && typeof Notification !== "undefined" && /mozilla/i.test(navigator.userAgent)) {
-        Notification.requestPermission(function (perm) {
-            if (perm === 'granted') {
-                notification_object = new Notification(title, {
-                    body: content,
-                    iconUrl: people.small_avatar_url(message),
-                    tag: message.id,
-                });
-                notification_object.onclick = function () {
-                    // We don't need to bring the browser window into focus explicitly
-                    // by calling `window.focus()` as well as don't need to clear the
-                    // notification since it is the default behavior in Firefox.
-                    narrow.by_topic(message.id, {trigger: 'notification'});
-                };
-            } else {
-                in_browser_notify(message, title, content, raw_operators, opts);
-            }
-        });
+
+        if (_.isFunction(notification_object.addEventListener)) {
+            // Sadly, some third-party Electron apps like Franz/Ferdi
+            // misimplement the Notification API not inheriting from
+            // EventTarget.  This results in addEventListener being
+            // unavailable for them.
+            notification_object.addEventListener("click", () => {
+                notification_object.close();
+                if (message.type !== "test-notification") {
+                    narrow.by_topic(message.id, {trigger: "notification"});
+                }
+                window.focus();
+            });
+            notification_object.addEventListener("close", () => {
+                notice_memory.delete(key);
+            });
+        }
     } else {
         in_browser_notify(message, title, content, raw_operators, opts);
     }
@@ -444,7 +433,7 @@ exports.process_notification = process_notification;
 exports.close_notification = function (message) {
     for (const [key, notice_mem_entry] of notice_memory) {
         if (notice_mem_entry.message_id === message.id) {
-            cancel_notification_object(notice_mem_entry.obj);
+            notice_mem_entry.obj.close();
             notice_memory.delete(key);
         }
     }
@@ -473,13 +462,11 @@ exports.message_is_notifiable = function (message) {
 
     // Messages to muted streams that don't mention us specifically
     // are not notifiable.
-    if (message.type === "stream" &&
-        stream_data.is_muted(message.stream_id)) {
+    if (message.type === "stream" && stream_data.is_muted(message.stream_id)) {
         return false;
     }
 
-    if (message.type === "stream" &&
-        muting.is_topic_muted(message.stream_id, message.topic)) {
+    if (message.type === "stream" && muting.is_topic_muted(message.stream_id, message.topic)) {
         return false;
     }
 
@@ -489,10 +476,17 @@ exports.message_is_notifiable = function (message) {
 };
 
 exports.should_send_desktop_notification = function (message) {
+    // Always notify for testing notifications.
+    if (message.type === "test-notification") {
+        return true;
+    }
+
     // For streams, send if desktop notifications are enabled for all
     // message on this stream.
-    if (message.type === "stream" &&
-        stream_data.receives_notifications(message.stream, "desktop_notifications")) {
+    if (
+        message.type === "stream" &&
+        stream_data.receives_notifications(message.stream_id, "desktop_notifications")
+    ) {
         return true;
     }
 
@@ -517,8 +511,10 @@ exports.should_send_desktop_notification = function (message) {
     }
 
     // wildcard mentions
-    if (message.mentioned &&
-            stream_data.receives_notifications(message.stream, "wildcard_mentions_notify")) {
+    if (
+        message.mentioned &&
+        stream_data.receives_notifications(message.stream_id, "wildcard_mentions_notify")
+    ) {
         return true;
     }
 
@@ -528,8 +524,10 @@ exports.should_send_desktop_notification = function (message) {
 exports.should_send_audible_notification = function (message) {
     // For streams, ding if sounds are enabled for all messages on
     // this stream.
-    if (message.type === "stream" &&
-        stream_data.receives_notifications(message.stream, "audible_notifications")) {
+    if (
+        message.type === "stream" &&
+        stream_data.receives_notifications(message.stream_id, "audible_notifications")
+    ) {
         return true;
     }
 
@@ -540,7 +538,7 @@ exports.should_send_audible_notification = function (message) {
 
     // And then we need to check if the message is a PM, mention,
     // wildcard mention with wildcard_mentions_notify, or alert.
-    if (message.type === "private") {
+    if (message.type === "private" || message.type === "test-notification") {
         return true;
     }
 
@@ -553,8 +551,10 @@ exports.should_send_audible_notification = function (message) {
     }
 
     // wildcard mentions
-    if (message.mentioned &&
-            stream_data.receives_notifications(message.stream, "wildcard_mentions_notify")) {
+    if (
+        message.mentioned &&
+        stream_data.receives_notifications(message.stream_id, "wildcard_mentions_notify")
+    ) {
         return true;
     }
 
@@ -562,15 +562,12 @@ exports.should_send_audible_notification = function (message) {
 };
 
 exports.granted_desktop_notifications_permission = function () {
-    return notifications_api &&
-            // 0 is PERMISSION_ALLOWED
-            notifications_api.checkPermission() === 0;
+    return NotificationAPI && NotificationAPI.permission === "granted";
 };
 
-
 exports.request_desktop_notifications_permission = function () {
-    if (notifications_api) {
-        return notifications_api.requestPermission();
+    if (NotificationAPI) {
+        NotificationAPI.requestPermission();
     }
 };
 
@@ -588,7 +585,7 @@ exports.received_messages = function (messages) {
 
         if (exports.should_send_desktop_notification(message)) {
             process_notification({
-                message: message,
+                message,
                 desktop_notify: exports.granted_desktop_notifications_permission(),
             });
         }
@@ -598,19 +595,33 @@ exports.received_messages = function (messages) {
     }
 };
 
+exports.send_test_notification = function (content) {
+    exports.received_messages([
+        {
+            id: Math.random(),
+            type: "test-notification",
+            sender_email: "notification-bot@zulip.com",
+            sender_full_name: "Notification Bot",
+            display_reply_to: "Notification Bot",
+            content,
+            unread: true,
+        },
+    ]);
+};
+
 function get_message_header(message) {
     if (message.type === "stream") {
         return message.stream + " > " + message.topic;
     }
     if (message.display_recipient.length > 2) {
-        return i18n.t("group private messages with __recipient__",
-                      {recipient: message.display_reply_to});
+        return i18n.t("group private messages with __recipient__", {
+            recipient: message.display_reply_to,
+        });
     }
     if (people.is_current_user(message.reply_to)) {
         return i18n.t("private messages with yourself");
     }
-    return i18n.t("private messages with __recipient__",
-                  {recipient: message.display_reply_to});
+    return i18n.t("private messages with __recipient__", {recipient: message.display_reply_to});
 }
 
 exports.get_local_notify_mix_reason = function (message) {
@@ -618,7 +629,7 @@ exports.get_local_notify_mix_reason = function (message) {
     if (row.length > 0) {
         // If our message is in the current message list, we do
         // not have a mix, so we are happy.
-        return;
+        return undefined;
     }
 
     if (message.type === "stream" && muting.is_topic_muted(message.stream_id, message.topic)) {
@@ -632,7 +643,16 @@ exports.get_local_notify_mix_reason = function (message) {
     // offscreen because it is outside narrow
     // we can only look for these on non-search (can_apply_locally) messages
     // see also: exports.notify_messages_outside_current_search
-    return i18n.t("Sent! Your message is outside your current narrow.");
+    const current_filter = narrow_state.filter();
+    if (
+        current_filter &&
+        current_filter.can_apply_locally() &&
+        !current_filter.predicate()(message)
+    ) {
+        return i18n.t("Sent! Your message is outside your current narrow.");
+    }
+
+    return undefined;
 };
 
 exports.notify_local_mixes = function (messages, need_user_to_scroll) {
@@ -658,7 +678,9 @@ exports.notify_local_mixes = function (messages, need_user_to_scroll) {
             // This can happen if the client is offline for a while
             // around the time this client sends a message; see the
             // caller of message_events.insert_new_messages.
-            blueslip.info('Slightly unexpected: A message not sent by us batches with those that were.');
+            blueslip.info(
+                "Slightly unexpected: A message not sent by us batches with those that were.",
+            );
             continue;
         }
 
@@ -668,8 +690,8 @@ exports.notify_local_mixes = function (messages, need_user_to_scroll) {
             if (need_user_to_scroll) {
                 reason = i18n.t("Sent! Scroll down to view your message.");
                 exports.notify_above_composebox(reason, "", null, "");
-                setTimeout(function () {
-                    $('#out-of-view-notification').hide();
+                setTimeout(() => {
+                    $("#out-of-view-notification").hide();
                 }, 3000);
             }
 
@@ -680,8 +702,9 @@ exports.notify_local_mixes = function (messages, need_user_to_scroll) {
 
         const link_msg_id = message.id;
         const link_class = "compose_notification_narrow_by_topic";
-        const link_text = i18n.t("Narrow to __- message_recipient__",
-                                 {message_recipient: get_message_header(message)});
+        const link_text = i18n.t("Narrow to __- message_recipient__", {
+            message_recipient: get_message_header(message),
+        });
 
         exports.notify_above_composebox(reason, link_class, link_msg_id, link_text);
     }
@@ -694,19 +717,22 @@ exports.notify_messages_outside_current_search = function (messages) {
         if (!people.is_current_user(message.sender_email)) {
             continue;
         }
-        const link_text = i18n.t("Narrow to __- message_recipient__",
-                                 {message_recipient: get_message_header(message)});
-        exports.notify_above_composebox(i18n.t("Sent! Your recent message is outside the current search."),
-                                        "compose_notification_narrow_by_topic",
-                                        message.id,
-                                        link_text);
+        const link_text = i18n.t("Narrow to __- message_recipient__", {
+            message_recipient: get_message_header(message),
+        });
+        exports.notify_above_composebox(
+            i18n.t("Sent! Your recent message is outside the current search."),
+            "compose_notification_narrow_by_topic",
+            message.id,
+            link_text,
+        );
     }
 };
 
 exports.clear_compose_notifications = function () {
-    $('#out-of-view-notification').empty();
-    $('#out-of-view-notification').stop(true, true);
-    $('#out-of-view-notification').hide();
+    $("#out-of-view-notification").empty();
+    $("#out-of-view-notification").stop(true, true);
+    $("#out-of-view-notification").hide();
 };
 
 exports.reify_message_id = function (opts) {
@@ -715,31 +741,31 @@ exports.reify_message_id = function (opts) {
 
     // If a message ID that we're currently storing (as a link) has changed,
     // update that link as well
-    for (const e of $('#out-of-view-notification a')) {
+    for (const e of $("#out-of-view-notification a")) {
         const elem = $(e);
-        const message_id = elem.data('message-id');
+        const message_id = elem.data("message-id");
 
         if (message_id === old_id) {
-            elem.data('message-id', new_id);
+            elem.data("message-id", new_id);
         }
     }
 };
 
 exports.register_click_handlers = function () {
-    $('#out-of-view-notification').on('click', '.compose_notification_narrow_by_topic', function (e) {
-        const message_id = $(e.currentTarget).data('message-id');
-        narrow.by_topic(message_id, {trigger: 'compose_notification'});
+    $("#out-of-view-notification").on("click", ".compose_notification_narrow_by_topic", (e) => {
+        const message_id = $(e.currentTarget).data("message-id");
+        narrow.by_topic(message_id, {trigger: "compose_notification"});
         e.stopPropagation();
         e.preventDefault();
     });
-    $('#out-of-view-notification').on('click', '.compose_notification_scroll_to_message', function (e) {
-        const message_id = $(e.currentTarget).data('message-id');
+    $("#out-of-view-notification").on("click", ".compose_notification_scroll_to_message", (e) => {
+        const message_id = $(e.currentTarget).data("message-id");
         current_msg_list.select_id(message_id);
         navigate.scroll_to_selected();
         e.stopPropagation();
         e.preventDefault();
     });
-    $('#out-of-view-notification').on('click', '.out-of-view-notification-close', function (e) {
+    $("#out-of-view-notification").on("click", ".out-of-view-notification-close", (e) => {
         exports.clear_compose_notifications();
         e.stopPropagation();
         e.preventDefault();

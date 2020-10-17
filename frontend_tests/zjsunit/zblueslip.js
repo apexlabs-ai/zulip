@@ -1,3 +1,5 @@
+"use strict";
+
 exports.make_zblueslip = function () {
     const lib = {};
 
@@ -14,7 +16,7 @@ exports.make_zblueslip = function () {
 
     // For fatal messages, we should use assert.throws
     lib.fatal = (msg) => {
-        throw Error(msg);
+        throw new Error(msg);
     };
 
     // Store valid test data for options.
@@ -28,10 +30,10 @@ exports.make_zblueslip = function () {
 
     lib.expect = (name, message, count = 1) => {
         if (opts[name] === undefined) {
-            throw Error('unexpected arg for expect: ' + name);
+            throw new Error("unexpected arg for expect: " + name);
         }
         if (count <= 0 && Number.isInteger(count)) {
-            throw Error('expected count should be a positive integer');
+            throw new Error("expected count should be a positive integer");
         }
         const obj = {message, count, expected_count: count};
         lib.test_data[name].push(obj);
@@ -41,12 +43,12 @@ exports.make_zblueslip = function () {
         for (const name of names) {
             for (const obj of lib.test_logs[name]) {
                 const message = obj.message;
-                const i = lib.test_data[name].findIndex(x => x.message === message);
+                const i = lib.test_data[name].findIndex((x) => x.message === message);
                 if (i === -1) {
                     // Only throw this for message types we want to explicitly track.
                     // For example, we do not want to throw here for debug messages.
                     if (opts[name]) {
-                        throw Error (`Unexpected '${name}' message: ${message}`);
+                        throw new Error(`Unexpected '${name}' message: ${message}`);
                     }
                     continue;
                 }
@@ -56,9 +58,15 @@ exports.make_zblueslip = function () {
             for (const obj of lib.test_data[name]) {
                 const message = obj.message;
                 if (obj.count > 0) {
-                    throw Error(`We saw ${obj.count} (expected ${obj.expected_count}) of '${name}': ${message}`);
+                    throw new Error(
+                        `We did not see expected ${obj.expected_count} of '${name}': ${message}`,
+                    );
                 } else if (obj.count < 0) {
-                    throw Error(`We saw ${obj.expected_count - obj.count} (expected ${obj.expected_count}) of '${name}': ${message}`);
+                    throw new Error(
+                        `We saw ${obj.expected_count - obj.count} (expected ${
+                            obj.expected_count
+                        }) of '${name}': ${message}`,
+                    );
                 }
             }
         }
@@ -75,9 +83,7 @@ exports.make_zblueslip = function () {
         }
     };
 
-    lib.get_test_logs = (name) => {
-        return lib.test_logs[name];
-    };
+    lib.get_test_logs = (name) => lib.test_logs[name];
 
     // Create logging functions
     for (const name of names) {
@@ -89,20 +95,20 @@ exports.make_zblueslip = function () {
             continue;
         }
         lib[name] = function (message, more_info, stack) {
-            if (typeof message !== 'string') {
+            if (typeof message !== "string") {
                 // We may catch exceptions in blueslip, and if
                 // so our stub should include that.
-                if (message.toString().includes('exception')) {
+                if (message.toString().includes("exception")) {
                     message = message.toString();
                 } else {
-                    throw Error('message should be string: ' + message);
+                    throw new Error("message should be string: " + message);
                 }
             }
             lib.test_logs[name].push({message, more_info, stack});
-            const matched_error_message = lib.test_data[name].find(x => x.message === message);
+            const matched_error_message = lib.test_data[name].find((x) => x.message === message);
             const exact_match_fail = !matched_error_message;
             if (exact_match_fail) {
-                const error = Error(`Invalid ${name} message: "${message}".`);
+                const error = new Error(`Invalid ${name} message: "${message}".`);
                 error.blueslip = true;
                 throw error;
             }
@@ -113,9 +119,9 @@ exports.make_zblueslip = function () {
         return ex.message;
     };
 
-    lib.start_timing = () => {
-        return () => {};
-    };
+    lib.start_timing = () => () => {};
+
+    lib.preview_node = (node) => "node:" + node;
 
     return lib;
 };

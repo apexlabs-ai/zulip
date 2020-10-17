@@ -1,38 +1,37 @@
+from typing import Any, Dict, Optional
+
 from django.db.models import Q
 from django.utils.timezone import now as timezone_now
 
-from zerver.models import (
-    UserStatus,
-)
+from zerver.models import UserStatus
 
-from typing import Any, Dict, Optional
 
-def get_user_info_dict(realm_id: int) -> Dict[int, Dict[str, Any]]:
+def get_user_info_dict(realm_id: int) -> Dict[str, Dict[str, Any]]:
     rows = UserStatus.objects.filter(
         user_profile__realm_id=realm_id,
         user_profile__is_active=True,
     ).exclude(
         Q(status=UserStatus.NORMAL) &
-        Q(status_text='')
+        Q(status_text=''),
     ).values(
         'user_profile_id',
         'status',
         'status_text',
     )
 
-    user_dict = dict()  # type: Dict[int, Dict[str, Any]]
+    user_dict: Dict[str, Dict[str, Any]] = {}
     for row in rows:
         away = row['status'] == UserStatus.AWAY
         status_text = row['status_text']
         user_id = row['user_profile_id']
 
-        dct = dict()
+        dct = {}
         if away:
             dct['away'] = away
         if status_text:
             dct['status_text'] = status_text
 
-        user_dict[user_id] = dct
+        user_dict[str(user_id)] = dct
 
     return user_dict
 

@@ -1,3 +1,5 @@
+"use strict";
+
 const settings_config = require("./settings_config");
 
 /*
@@ -11,24 +13,32 @@ const settings_config = require("./settings_config");
 */
 
 exports.show_email = function () {
-    if (page_params.realm_email_address_visibility ===
-        settings_config.email_address_visibility_values.everyone.code) {
+    if (
+        page_params.realm_email_address_visibility ===
+        settings_config.email_address_visibility_values.everyone.code
+    ) {
         return true;
     }
-    if (page_params.realm_email_address_visibility ===
-        settings_config.email_address_visibility_values.admins_only.code) {
+    if (
+        page_params.realm_email_address_visibility ===
+        settings_config.email_address_visibility_values.admins_only.code
+    ) {
         return page_params.is_admin;
     }
+    return undefined;
 };
 
 exports.email_for_user_settings = function (person) {
     if (!exports.show_email()) {
-        return;
+        return undefined;
     }
 
-    if (page_params.is_admin && person.delivery_email &&
-            page_params.realm_email_address_visibility ===
-            settings_config.email_address_visibility_values.admins_only.code) {
+    if (
+        page_params.is_admin &&
+        person.delivery_email &&
+        page_params.realm_email_address_visibility ===
+            settings_config.email_address_visibility_values.admins_only.code
+    ) {
         return person.delivery_email;
     }
 
@@ -46,4 +56,8 @@ exports.get_time_preferences = function (user_timezone) {
         timezone: user_timezone,
         format: "h:mm A",
     };
+};
+
+exports.user_can_change_logo = function () {
+    return page_params.is_admin && page_params.zulip_plan_is_not_limited;
 };

@@ -3,8 +3,8 @@ import os
 import tempfile
 from typing import Any
 
-from django.core.management.base import BaseCommand, CommandError, \
-    CommandParser
+from django.conf import settings
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from zerver.data_import.gitter import do_convert_data
 
@@ -18,13 +18,10 @@ class Command(BaseCommand):
                             help="Gitter data in json format")
 
         parser.add_argument('--output', dest='output_dir',
-                            action="store", default=None,
                             help='Directory to write exported data to.')
 
         parser.add_argument('--threads',
-                            dest='threads',
-                            action="store",
-                            default=6,
+                            default=settings.DEFAULT_DATA_EXPORT_IMPORT_PARALLELISM,
                             help='Threads to download avatars and attachments faster')
 
         parser.formatter_class = argparse.RawTextHelpFormatter
@@ -42,7 +39,7 @@ class Command(BaseCommand):
 
         for path in options['gitter_data']:
             if not os.path.exists(path):
-                raise CommandError("Gitter data file not found: '%s'" % (path,))
+                raise CommandError(f"Gitter data file not found: '{path}'")
             # TODO add json check
             print("Converting Data ...")
             do_convert_data(path, output_dir, num_threads)

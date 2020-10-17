@@ -1,4 +1,4 @@
-Using the Development Environment
+Using the development environment
 =================================
 
 This page describes the basic edit/refresh workflows for working with
@@ -32,7 +32,7 @@ the development environment][authentication-dev-server].
   database with different test data, are documented in-app at
   `https://localhost:9991/devtools`.
 * If you want to restore your development environment's database to a
-  pristine state, you can use `./tools/do-destroy-rebuild-database`.
+  pristine state, you can use `./tools/rebuild-dev-database`.
 
 ## Server
 
@@ -66,7 +66,7 @@ the development environment][authentication-dev-server].
 * Once the development server (`run-dev.py`) is running, you can visit
   <http://localhost:9991/> in your browser.
 * By default, the development server homepage just shows a list of the
-  users that exist on the server and you can login as any of them by
+  users that exist on the server and you can log in as any of them by
   just clicking on a user.
     * This setup saves time for the common case where you want to test
     something other than the login process.
@@ -92,7 +92,7 @@ the development environment][authentication-dev-server].
 See the mobile project's documentation on [using a development server
 for mobile development][mobile-dev-server].
 
-[rest-api]: https://zulipchat.com/api/rest
+[rest-api]: https://zulip.com/api/rest
 [authentication-dev-server]: ./authentication.md
 [django-runserver]: https://docs.djangoproject.com/en/1.8/ref/django-admin/#runserver-port-or-address-port
 [new-feature-tutorial]: ../tutorials/new-feature-tutorial.md

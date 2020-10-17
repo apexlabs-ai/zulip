@@ -1,8 +1,7 @@
 from typing import Any
 
 from django.conf import settings
-from django.core.management.base import BaseCommand, CommandError, \
-    CommandParser
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from zerver.lib.transfer import transfer_uploads_to_s3
 
@@ -12,9 +11,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument('--processes',
-                            dest='processes',
-                            action="store",
-                            default=6,
+                            default=settings.DEFAULT_DATA_EXPORT_IMPORT_PARALLELISM,
                             help='Processes to use for exporting uploads in parallel')
 
     def handle(self, *args: Any, **options: Any) -> None:

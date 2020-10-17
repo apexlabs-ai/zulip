@@ -12,8 +12,9 @@ Some examples are:
   (subscription etc.)
 * `/#streams/11/announce`: Streams overlay with stream ID 11 (called
   "announce") selected.
-* `/#narrow/stream/android/subject/fun`: Message feed showing stream
-  "android" and topic "fun".
+* `/#narrow/stream/42-android/topic/fun`: Message feed showing stream
+  "android" and topic "fun".  (The `42` represents the id of the
+   stream.
 
 The main module in the frontend that manages this all is
 `static/js/hashchange.js` (plus `hash_util.js` for all the parsing
@@ -50,7 +51,7 @@ different flows:
 When making changes to the hashchange system, it is **essential** to
 test all of these flows, since we don't have great automated tests for
 all of this (would be a good project to add them to the
-[Casper suite][testing-with-casper]) and there's enough complexity
+[Puppeteer suite][testing-with-puppeteer]) and there's enough complexity
 that it's easy to accidentally break something.
 
 The main external API is below:
@@ -118,6 +119,6 @@ browser, Zulip also does a few bookkeeping things on page reload (like
 cleaning up its event queue, and saving any text in an open compose
 box as a draft).
 
-[testing-with-casper]: ../testing/testing-with-casper.md
+[testing-with-puppeteer]: ../testing/testing-with-puppeteer.md
 [self-server-reloads]: #server-initiated-reloads
 [events-system]: ../subsystems/events-system.md

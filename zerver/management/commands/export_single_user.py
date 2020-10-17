@@ -19,12 +19,10 @@ class Command(ZulipBaseCommand):
     with (for example) any bots owned by the user."""
 
     def add_arguments(self, parser: ArgumentParser) -> None:
-        parser.add_argument('email', metavar='<email>', type=str,
+        parser.add_argument('email', metavar='<email>',
                             help="email of user to export")
         parser.add_argument('--output',
                             dest='output_dir',
-                            action="store",
-                            default=None,
                             help='Directory to write exported data to.')
         self.add_realm_args(parser)
 
@@ -38,9 +36,9 @@ class Command(ZulipBaseCommand):
         if os.path.exists(output_dir):
             shutil.rmtree(output_dir)
         os.makedirs(output_dir)
-        print("Exporting user %s" % (user_profile.delivery_email,))
+        print(f"Exporting user {user_profile.delivery_email}")
         do_export_user(user_profile, output_dir)
-        print("Finished exporting to %s; tarring" % (output_dir,))
+        print(f"Finished exporting to {output_dir}; tarring")
         tarball_path = output_dir.rstrip('/') + '.tar.gz'
         subprocess.check_call(["tar", "--strip-components=1", "-czf", tarball_path, output_dir])
-        print("Tarball written to %s" % (tarball_path,))
+        print(f"Tarball written to {tarball_path}")

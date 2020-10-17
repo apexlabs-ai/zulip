@@ -95,7 +95,7 @@
 * [View organization statistics](/help/analytics)
 * [Linking to Zulip](/help/linking-to-zulip)
 * [Connect through a proxy](/help/connect-through-a-proxy)
-* [Add a custom certificate](/help/custom-certificates)
+* [Use a custom certificate](/help/custom-certificates)
 
 ## Apps
 * [Desktop installation guides](/help/desktop-app-install-guide)
@@ -113,8 +113,9 @@
 * [Roles and permissions](/help/roles-and-permissions)
 * [Set the default language for new users](/help/change-the-default-language-for-your-organization)
 * [Export your organization](/help/export-your-organization)
+* [Change organization URL](/help/change-organization-url)
 * [Deactivate your organization](/help/deactivate-your-organization)
-* [GDPR Compliance](/help/gdpr-compliance)
+* [GDPR compliance](/help/gdpr-compliance)
 
 ## Organization settings
 * [Restrict stream creation](/help/configure-who-can-create-streams)
@@ -136,6 +137,8 @@
 * [Add custom emoji](/help/add-custom-emoji)
 * [Configure authentication methods](/help/configure-authentication-methods)
 * [Add a custom linkification filter](/help/add-a-custom-linkification-filter)
+* [Message retention policy](/help/message-retention-policy)
+* [SAML authentication](/help/saml-authentication)
 
 ## Users & bots
 * [Invite new users](/help/invite-new-users)
@@ -161,3 +164,6 @@
 * [Change the privacy of a stream](/help/change-the-privacy-of-a-stream)
 * [Add or remove users from a stream](/help/add-or-remove-users-from-a-stream)
 * [Stream posting policy](/help/stream-sending-policy)
+
+## Support
+* [Contact support](/help/contact-support)

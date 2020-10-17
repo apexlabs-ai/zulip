@@ -1,3 +1,5 @@
+"use strict";
+
 // A few of our width properties in zulip depend on the width of the
 // browser scrollbar that is generated at the far right side of the
 // page, which unfortunately varies depending on the browser and
@@ -11,7 +13,7 @@ function getScrollbarWidth() {
     outer.style.width = "100px";
     outer.style.msOverflowStyle = "scrollbar"; // needed for WinJS apps
 
-    document.body.appendChild(outer);
+    document.body.append(outer);
 
     const widthNoScroll = outer.offsetWidth;
     // force scrollbars
@@ -20,12 +22,12 @@ function getScrollbarWidth() {
     // add innerdiv
     const inner = document.createElement("div");
     inner.style.width = "100%";
-    outer.appendChild(inner);
+    outer.append(inner);
 
     const widthWithScroll = inner.offsetWidth;
 
     // remove divs
-    outer.parentNode.removeChild(outer);
+    outer.remove();
 
     return widthNoScroll - widthWithScroll;
 }
@@ -33,7 +35,7 @@ function getScrollbarWidth() {
 let sbWidth;
 
 exports.initialize = function () {
-// Workaround for browsers with fixed scrollbars
+    // Workaround for browsers with fixed scrollbars
     sbWidth = getScrollbarWidth();
 
     if (sbWidth > 0) {
@@ -45,17 +47,24 @@ exports.initialize = function () {
         $(".fixed-app .column-middle").css("margin-left", 250 + sbWidth + "px");
 
         $(".column-right").css("right", sbWidth + "px");
-        $(".app-main .right-sidebar").css({"margin-left": sbWidth + "px",
-                                           width: 250 - sbWidth + "px"});
+        $(".app-main .right-sidebar").css({
+            "margin-left": sbWidth + "px",
+            width: 250 - sbWidth + "px",
+        });
 
         $("#compose").css("left", "-" + sbWidth + "px");
-        $(".compose-content").css({left: sbWidth + "px",
-                                   "margin-right": 250 + sbWidth + "px"});
-        $('#keyboard-icon').css({right: sbWidth + 35 + "px"});
+        $(".compose-content").css({left: sbWidth + "px", "margin-right": 250 + sbWidth + "px"});
+        $("#keyboard-icon").css({right: sbWidth + 35 + "px"});
 
-        $("head").append("<style> @media (max-width: 1165px) { .compose-content, .header-main .column-middle { margin-right: " + (7 + sbWidth) + "px !important; } } " +
-                         "@media (max-width: 775px) { .fixed-app .column-middle { margin-left: " + (7 + sbWidth) + "px !important; } } " +
-                         "</style>");
+        $("head").append(
+            "<style> @media (max-width: 1165px) { .compose-content, .header-main .column-middle { margin-right: " +
+                (7 + sbWidth) +
+                "px !important; } } " +
+                "@media (max-width: 775px) { .fixed-app .column-middle { margin-left: " +
+                (7 + sbWidth) +
+                "px !important; } } " +
+                "</style>",
+        );
     }
     exports.set_layout_width();
 };

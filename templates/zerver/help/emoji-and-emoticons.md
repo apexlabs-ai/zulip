@@ -37,7 +37,7 @@ emoji picker, or hover over the emoji in a message.
 
 ### Use emoticons
 
-Use `:)` and `:/` instead of typing `:slight_smile:` and `:confused:`.
+Use `:)` and `:/` instead of typing `:smile:` and `:confused:`.
 
 {start_tabs}
 
@@ -52,8 +52,8 @@ The list of supported emoticons is available
 
 ### Paste from another site
 
-Copying and pasting emoji from other sites generally works. Email us at
-support@zulipchat.com if you find a site where it doesn't!
+Copying and pasting emoji from other sites generally works.
+[Contact us](/help/contact-support) if you find a site where it doesn't!
 
 ## Change your emoji set
 

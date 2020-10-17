@@ -1,4 +1,4 @@
-# Installing SSL Certificates
+# Installing SSL certificates
 
 To keep your communications secure, Zulip runs over HTTPS only.
 You'll need an SSL/TLS certificate.
@@ -138,7 +138,7 @@ running the following as `root`:
 service nginx reload
 ```
 
-[desktop-certs]: https://zulipchat.com/help/custom-certificates
+[desktop-certs]: https://zulip.com/help/custom-certificates
 
 
 ## Troubleshooting

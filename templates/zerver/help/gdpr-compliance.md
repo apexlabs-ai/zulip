@@ -1,8 +1,8 @@
-# GDPR Compliance
+# GDPR compliance
 
 This page covers how Zulip interacts with the EU's landmark GDPR
 legislation; you can read the
-[Zulip Cloud privacy policy](https://zulipchat.com/privacy) for our
+[Zulip Cloud privacy policy](https://zulip.com/privacy) for our
 general privacy policies.
 
 ## What is GDPR?
@@ -13,7 +13,7 @@ give them control over how their personal data is collected,
 processed, and used.  The law applies to any company that collects or
 processes the data of European consumers.
 
-## Controllers and Processors
+## Controllers and processors
 
 There are two key relationships that are defined in the GDPR. As a
 customer of Zulip Cloud, you operate as the controller when using our
@@ -35,7 +35,7 @@ personal data. These entities are commonly referred to as
 sub-processors. For example, Kandra Labs leverages cloud service
 providers like Amazon Web Services and Mailgun to host Zulip Cloud.
 
-## How Zulip Supports GDPR Compliance
+## How Zulip supports GDPR compliance
 
 We’re committed to the compliance of all parties including you,
 third-parties, and us.
@@ -66,7 +66,7 @@ this page but not defined have the meaning set forth in Zulip's Terms
 of Service or superseding written agreement between Customer and
 Kandra Labs (the "Agreement").
 
-### Third Parties
+### Third parties
 
 Zulip currently uses third party Subprocessors to provide
 infrastructure services, and to help us provide customer support and
@@ -82,7 +82,7 @@ our Services:
 
 * [Amazon Web Services, Inc.](https://aws.amazon.com/compliance/gdpr-center/)
   for cloud infrastructure.
-* [Digital Ocean, Inc.](https://www.digitalocean.com/security/gdpr/)
+* [DigitalOcean, Inc.](https://www.digitalocean.com/security/gdpr/)
   for cloud infrastructure.
 * [Front, Inc.](https://community.frontapp.com/t/x1p4mw/is-front-compliant-with-gdpr)
   for customer support.
@@ -112,10 +112,10 @@ GDPR:
   user's Zulip profile, which you can access from the right sidebar.
 * The [Zulip Cloud export](/help/export-your-organization) supports exporting
   all the data related to a Zulip user or organization.
-* The [Zulip REST API](https://zulipchat.com/api/rest) lets you
+* The [Zulip REST API](/api/rest) lets you
   automate your processes for handling GDPR requests.
 
-Contact [support@zulipchat.com](mailto:support@zulipchat.com) for
+Contact [support@zulip.com](mailto:support@zulip.com) for
 any assistance related to this topic.
 
 ## GDPR compliance on-premises
@@ -141,5 +141,5 @@ may be useful:
 There's a lot more that goes into GDPR compliance, including securing
 your server infrastructure responsibly, internal policies around
 access, logging, and backups, etc.  If you need detailed guidance, we
-recommend contacting support@zulipchat.com; our paid support contracts
+recommend contacting support@zulip.com; our paid support contracts
 include assistance with understanding GDPR compliance with Zulip.

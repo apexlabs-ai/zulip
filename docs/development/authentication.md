@@ -24,7 +24,7 @@ lower-case naming convention for that file.
 Below, we document the procedure for each of the major authentication
 methods supported by Zulip.
 
-### Email and Password
+### Email and password
 
 Zulip's default EmailAuthBackend authenticates users by verifying
 control over their email address, and then allowing them to set a
@@ -82,6 +82,26 @@ details worth understanding:
   your new application.  In `dev-secrets.conf`, enter the Application
   ID as `social_auth_gitlab_key` and the Secret as
   `social_auth_gitlab_secret`.
+
+### Apple
+
+* Visit https://developer.apple.com/account/resources/,
+  Enable App ID and Create a Services ID with the instructions in
+  https://help.apple.com/developer-account/?lang=en#/dev1c0e25352 .
+  When prompted for a "Return URL", enter
+  `http://zulipdev.com:9991/complete/apple/` .
+
+* [Create a Sign in with Apple private key](https://help.apple.com/developer-account/?lang=en#/dev77c875b7e)
+
+* In `dev-secrets.conf`, set
+    * `social_auth_apple_services_id` to your
+      "Services ID" (eg. com.application.your).
+    * `social_auth_apple_app_id` to "App ID" or "Bundle ID".
+      This is only required if you are testing Apple auth on iOS.
+    * `social_auth_apple_key` to your "Key ID".
+    * `social_auth_apple_team` to your "Team ID".
+* Put the private key file you got from apple at the path
+  `zproject/dev_apple.key`.
 
 ### SAML
 
@@ -184,7 +204,7 @@ exactly what data is being used in the test without looking at other
 resources.  It also gives us more freedom to edit the development
 environment directory without worrying about tests.
 
-## Two Factor Authentication
+## Two factor authentication
 
 Zulip uses [django-two-factor-auth][0] as a beta 2FA integration.
 

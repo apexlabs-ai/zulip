@@ -13,11 +13,12 @@ user, or anything else. Make sure to read the
 before posting. The Zulip community is also governed by a
 [code of conduct](https://zulip.readthedocs.io/en/latest/code-of-conduct.html).
 
-You can subscribe to zulip-devel-announce@googlegroups.com or our
-[Twitter](https://twitter.com/zulip) account for a lower traffic (~1
-email/month) way to hear about things like mentorship opportunities with Google
-Code-in, in-person sprints at conferences, and other opportunities to
-contribute.
+You can subscribe to
+[zulip-devel-announce@googlegroups.com](https://groups.google.com/g/zulip-devel-announce)
+or our [Twitter](https://twitter.com/zulip) account for a very low
+traffic (<1 email/month) way to hear about things like mentorship
+opportunities with Google Summer of Code, in-person sprints at
+conferences, and other opportunities to contribute.
 
 ## Ways to contribute
 
@@ -32,8 +33,8 @@ needs doing:
   [desktop app](https://github.com/zulip/zulip-desktop).
 * Building out our
   [Python API and bots](https://github.com/zulip/python-zulip-api) framework.
-* [Writing an integration](https://zulipchat.com/api/integrations-overview).
-* Improving our [user](https://zulipchat.com/help/) or
+* [Writing an integration](https://zulip.com/api/integrations-overview).
+* Improving our [user](https://zulip.com/help/) or
   [developer](https://zulip.readthedocs.io/en/latest/) documentation.
 * [Reviewing code](https://zulip.readthedocs.io/en/latest/contributing/code-reviewing.html)
   and manually testing pull requests.
@@ -214,7 +215,7 @@ if appropriate.
 
 **Reporting security issues**. Please do not report security issues
   publicly, including on public streams on chat.zulip.org. You can
-  email security@zulipchat.com.  We create a CVE for every security
+  email security@zulip.com.  We create a CVE for every security
   issue in our released software.
 
 ## User feedback
@@ -299,7 +300,7 @@ for ZSoC, we'll contact you when the GSoC results are announced.
 [gsoc-guide]: https://zulip.readthedocs.io/en/latest/overview/gsoc-ideas.html
 [gsoc-faq]: https://developers.google.com/open-source/gsoc/faq
 
-## Zulip Outreach
+## Zulip outreach
 
 **Upvoting Zulip**. Upvotes and reviews make a big difference in the public
 perception of projects like Zulip. We've collected a few sites below

@@ -1,7 +1,7 @@
 from django.conf import settings
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.utils.translation import ugettext as _
-from django.http import HttpResponse, HttpRequest
 
 from zerver.decorator import require_realm_admin
 from zerver.lib.actions import do_change_icon_source
@@ -20,14 +20,15 @@ def upload_icon(request: HttpRequest, user_profile: UserProfile) -> HttpResponse
 
     icon_file = list(request.FILES.values())[0]
     if ((settings.MAX_ICON_FILE_SIZE * 1024 * 1024) < icon_file.size):
-        return json_error(_("Uploaded file is larger than the allowed limit of %s MB") % (
-            settings.MAX_ICON_FILE_SIZE))
+        return json_error(_("Uploaded file is larger than the allowed limit of {} MiB").format(
+            settings.MAX_ICON_FILE_SIZE,
+        ))
     upload_icon_image(icon_file, user_profile)
-    do_change_icon_source(user_profile.realm, user_profile.realm.ICON_UPLOADED)
+    do_change_icon_source(user_profile.realm, user_profile.realm.ICON_UPLOADED, acting_user=user_profile)
     icon_url = realm_icon_url(user_profile.realm)
 
     json_result = dict(
-        icon_url=icon_url
+        icon_url=icon_url,
     )
     return json_success(json_result)
 
@@ -35,12 +36,12 @@ def upload_icon(request: HttpRequest, user_profile: UserProfile) -> HttpResponse
 @require_realm_admin
 def delete_icon_backend(request: HttpRequest, user_profile: UserProfile) -> HttpResponse:
     # We don't actually delete the icon because it might still
-    # be needed if the URL was cached and it is rewrited
+    # be needed if the URL was cached and it is rewritten
     # in any case after next update.
-    do_change_icon_source(user_profile.realm, user_profile.realm.ICON_FROM_GRAVATAR)
+    do_change_icon_source(user_profile.realm, user_profile.realm.ICON_FROM_GRAVATAR, acting_user=user_profile)
     gravatar_url = realm_icon_url(user_profile.realm)
     json_result = dict(
-        icon_url=gravatar_url
+        icon_url=gravatar_url,
     )
     return json_success(json_result)
 

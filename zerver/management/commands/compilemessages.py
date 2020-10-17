@@ -4,15 +4,15 @@ import re
 from subprocess import CalledProcessError, check_output
 from typing import Any, Dict, List
 
+import orjson
 import polib
-import ujson
 from django.conf import settings
 from django.conf.locale import LANG_INFO
 from django.core.management.base import CommandParser
 from django.core.management.commands import compilemessages
+from django.utils.translation import override as override_language
+from django.utils.translation import ugettext as _
 from django.utils.translation.trans_real import to_language
-
-from zerver.lib.i18n import with_language
 
 
 class Command(compilemessages.Command):
@@ -23,7 +23,6 @@ class Command(compilemessages.Command):
         parser.add_argument(
             '--strict', '-s',
             action='store_true',
-            default=False,
             help='Stop execution in case of errors.')
 
     def handle(self, *args: Any, **options: Any) -> None:
@@ -38,8 +37,8 @@ class Command(compilemessages.Command):
         path = join(deploy_root, 'locale', 'language_options.json')
         output_path = join(deploy_root, 'locale', 'language_name_map.json')
 
-        with open(path) as reader:
-            languages = ujson.load(reader)
+        with open(path, "rb") as reader:
+            languages = orjson.loads(reader.read())
             lang_list = []
             for lang_info in languages['languages']:
                 lang_info['name'] = lang_info['name_local']
@@ -48,29 +47,27 @@ class Command(compilemessages.Command):
 
             lang_list.sort(key=lambda lang: lang['name'])
 
-        with open(output_path, 'w') as output_file:
-            ujson.dump({'name_map': lang_list}, output_file, indent=4, sort_keys=True)
-            output_file.write('\n')
+        with open(output_path, 'wb') as output_file:
+            output_file.write(
+                orjson.dumps(
+                    {'name_map': lang_list},
+                    option=orjson.OPT_APPEND_NEWLINE | orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS,
+                )
+            )
 
     def get_po_filename(self, locale_path: str, locale: str) -> str:
         po_template = '{}/{}/LC_MESSAGES/django.po'
         return po_template.format(locale_path, locale)
 
     def get_json_filename(self, locale_path: str, locale: str) -> str:
-        return "{}/{}/translations.json".format(locale_path, locale)
+        return f"{locale_path}/{locale}/translations.json"
 
     def get_name_from_po_file(self, po_filename: str, locale: str) -> str:
-        lang_name_re = re.compile(r'"Language-Team: (.*?) \(')
-        with open(po_filename) as reader:
-            result = lang_name_re.search(reader.read())
-            if result:
-                try:
-                    return result.group(1)
-                except Exception:
-                    print("Problem in parsing {}".format(po_filename))
-                    raise
-            else:
-                raise Exception("Unknown language %s" % (locale,))
+        try:
+            team = polib.pofile(po_filename).metadata["Language-Team"]
+            return team[:team.rindex(" (")]
+        except (KeyError, ValueError):
+            raise Exception(f"Unknown language {locale}")
 
     def get_locales(self) -> List[str]:
         output = check_output(['git', 'ls-files', 'locale'])
@@ -85,10 +82,10 @@ class Command(compilemessages.Command):
         return locales
 
     def extract_language_options(self) -> None:
-        locale_path = "{}/locale".format(settings.DEPLOY_ROOT)
-        output_path = "{}/language_options.json".format(locale_path)
+        locale_path = f"{settings.DEPLOY_ROOT}/locale"
+        output_path = f"{locale_path}/language_options.json"
 
-        data = {'languages': []}  # type: Dict[str, List[Dict[str, Any]]]
+        data: Dict[str, List[Dict[str, Any]]] = {'languages': []}
 
         try:
             locales = self.get_locales()
@@ -114,7 +111,7 @@ class Command(compilemessages.Command):
                 # Not a locale.
                 continue
 
-            info = {}  # type: Dict[str, Any]
+            info: Dict[str, Any] = {}
             code = to_language(locale)
             percentage = self.get_translation_percentage(locale_path, locale)
             try:
@@ -124,7 +121,8 @@ class Command(compilemessages.Command):
                 # Fallback to getting the name from PO file.
                 filename = self.get_po_filename(locale_path, locale)
                 name = self.get_name_from_po_file(filename, locale)
-                name_local = with_language(name, code)
+                with override_language(code):
+                    name_local = _(name)
 
             info['name'] = name
             info['name_local'] = name_local
@@ -145,15 +143,15 @@ class Command(compilemessages.Command):
         total = len(po.translated_entries()) + not_translated
 
         # frontend stats
-        with open(self.get_json_filename(locale_path, locale)) as reader:
-            for key, value in ujson.load(reader).items():
+        with open(self.get_json_filename(locale_path, locale), "rb") as reader:
+            for key, value in orjson.loads(reader.read()).items():
                 total += 1
                 if value == '':
                     not_translated += 1
 
         # mobile stats
-        with open(os.path.join(locale_path, 'mobile_info.json')) as mob:
-            mobile_info = ujson.load(mob)
+        with open(os.path.join(locale_path, 'mobile_info.json'), "rb") as mob:
+            mobile_info = orjson.loads(mob.read())
         try:
             info = mobile_info[locale]
         except KeyError:

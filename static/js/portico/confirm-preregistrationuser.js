@@ -1,3 +1,5 @@
-$(function () {
-    $("#register").submit();
+"use strict";
+
+$(() => {
+    $("#register").trigger("submit");
 });

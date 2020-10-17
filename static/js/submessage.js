@@ -1,21 +1,21 @@
+"use strict";
+
 exports.get_message_events = function (message) {
     if (message.locally_echoed) {
-        return;
+        return undefined;
     }
 
     if (!message.submessages) {
-        return;
+        return undefined;
     }
 
     if (message.submessages.length === 0) {
-        return;
+        return undefined;
     }
 
-    message.submessages.sort(function (m1, m2) {
-        return parseInt(m1.id, 10) - parseInt(m2.id, 10);
-    });
+    message.submessages.sort((m1, m2) => Number.parseInt(m1.id, 10) - Number.parseInt(m2.id, 10));
 
-    const events = message.submessages.map(obj => ({
+    const events = message.submessages.map((obj) => ({
         sender_id: obj.sender_id,
         data: JSON.parse(obj.content),
     }));
@@ -28,8 +28,9 @@ exports.process_submessages = function (in_opts) {
     // damage that may be triggered by one rogue message.
     try {
         return exports.do_process_submessages(in_opts);
-    } catch (err) {
-        blueslip.error('in process_submessages: ' + err.message);
+    } catch (error) {
+        blueslip.error("in process_submessages: " + error.message);
+        return undefined;
     }
 };
 
@@ -66,12 +67,12 @@ exports.do_process_submessages = function (in_opts) {
     const post_to_server = exports.make_server_callback(message_id);
 
     widgetize.activate({
-        widget_type: widget_type,
+        widget_type,
         extra_data: data.extra_data,
-        events: events,
-        row: row,
-        message: message,
-        post_to_server: post_to_server,
+        events,
+        row,
+        message,
+        post_to_server,
     });
 };
 
@@ -90,7 +91,7 @@ exports.update_message = function (submsg) {
         message.submessages = [];
     }
 
-    const existing = message.submessages.find(sm => sm.id === submsg.id);
+    const existing = message.submessages.find((sm) => sm.id === submsg.id);
 
     if (existing !== undefined) {
         blueslip.warn("Got submessage multiple times: " + submsg.id);
@@ -109,8 +110,8 @@ exports.handle_event = function (submsg) {
     // Right now, our only use of submessages is widgets.
     const msg_type = submsg.msg_type;
 
-    if (msg_type !== 'widget') {
-        blueslip.warn('unknown msg_type: ' + msg_type);
+    if (msg_type !== "widget") {
+        blueslip.warn("unknown msg_type: " + msg_type);
         return;
     }
 
@@ -118,26 +119,26 @@ exports.handle_event = function (submsg) {
 
     try {
         data = JSON.parse(submsg.content);
-    } catch (err) {
-        blueslip.error('server sent us invalid json in handle_event: ' + submsg.content);
+    } catch {
+        blueslip.error("server sent us invalid json in handle_event: " + submsg.content);
         return;
     }
 
     widgetize.handle_event({
         sender_id: submsg.sender_id,
         message_id: submsg.message_id,
-        data: data,
+        data,
     });
 };
 
 exports.make_server_callback = function (message_id) {
     return function (opts) {
-        const url = '/json/submessage';
+        const url = "/json/submessage";
 
         channel.post({
-            url: url,
+            url,
             data: {
-                message_id: message_id,
+                message_id,
                 msg_type: opts.msg_type,
                 content: JSON.stringify(opts.data),
             },

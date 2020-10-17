@@ -1,17 +1,9 @@
-from zerver.data_import.hipchat import (
-    get_hipchat_sender_id,
-)
-from zerver.data_import.hipchat_user import (
-    UserHandler,
-)
-from zerver.data_import.sequencer import (
-    IdMapper,
-)
-
-from zerver.lib.test_classes import (
-    ZulipTestCase,
-)
 from typing import Any, Dict
+
+from zerver.data_import.hipchat import get_hipchat_sender_id
+from zerver.data_import.hipchat_user import UserHandler
+from zerver.data_import.sequencer import IdMapper
+from zerver.lib.test_classes import ZulipTestCase
 
 
 class HipChatImporter(ZulipTestCase):
@@ -20,7 +12,7 @@ class HipChatImporter(ZulipTestCase):
         user_handler = UserHandler()
 
         user_id_mapper = IdMapper()
-        user_id_mapper.has = lambda key: True  # type: ignore # it's just a stub
+        self.assertEqual(user_id_mapper.get(1), 1)
 
         # Simulate a "normal" user first.
         user_with_id = dict(
@@ -29,11 +21,11 @@ class HipChatImporter(ZulipTestCase):
         )
         user_handler.add_user(user=user_with_id)
 
-        normal_message = dict(
+        normal_message: Dict[str, Any] = dict(
             sender=dict(
                 id=1,
-            )
-        )  # type: Dict[str, Any]
+            ),
+        )
 
         sender_id = get_hipchat_sender_id(
             realm_id=realm_id,

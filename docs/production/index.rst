@@ -1,5 +1,5 @@
 ###################
-Zulip in Production
+Zulip in production
 ###################
 
 .. toctree::
@@ -21,3 +21,4 @@ Zulip in Production
    email
    deployment
    email-gateway
+   zoom-configuration

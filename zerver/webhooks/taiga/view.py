@@ -10,14 +10,14 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from django.http import HttpRequest, HttpResponse
 
-from zerver.decorator import api_key_only_webhook_view
+from zerver.decorator import webhook_view
 from zerver.lib.request import REQ, has_request_variables
 from zerver.lib.response import json_success
 from zerver.lib.webhooks.common import check_send_webhook_message
 from zerver.models import UserProfile
 
 
-@api_key_only_webhook_view('Taiga')
+@webhook_view('Taiga')
 @has_request_variables
 def api_taiga_webhook(request: HttpRequest, user_profile: UserProfile,
                       message: Dict[str, Any]=REQ(argument_type='body')) -> HttpResponse:
@@ -93,7 +93,7 @@ templates = {
         ' to {new}.',
         'set_estimated_finish': '[{user}]({user_link}) set estimated finish of sprint {subject}'
         ' to {new}.',
-        'delete': '[{user}]({user_link}) deleted sprint {subject}.'
+        'delete': '[{user}]({user_link}) deleted sprint {subject}.',
     },
     'task': {
         'create': '[{user}]({user_link}) created task {subject}.',
@@ -143,7 +143,7 @@ templates = {
         'unblocked': '[{user}]({user_link}) unblocked issue {subject}.',
     },
     'webhook_test': {
-        'test': '[{user}]({user_link}) triggered a test of the Taiga integration.'
+        'test': '[{user}]({user_link}) triggered a test of the Taiga integration.',
     },
 }
 
@@ -165,8 +165,8 @@ def parse_comment(message: Mapping[str, Any]) -> Dict[str, Any]:
         'values': {
             'user': get_owner_name(message),
             'user_link': get_owner_link(message),
-            'subject': get_subject(message)
-        }
+            'subject': get_subject(message),
+        },
     }
 
 def parse_create_or_delete(message: Mapping[str, Any]) -> Dict[str, Any]:
@@ -180,7 +180,7 @@ def parse_create_or_delete(message: Mapping[str, Any]) -> Dict[str, Any]:
                 'user_link': get_owner_link(message),
                 'epic_subject': get_epic_subject(message),
                 'userstory_subject': get_userstory_subject(message),
-            }
+            },
         }
 
     return {
@@ -190,18 +190,18 @@ def parse_create_or_delete(message: Mapping[str, Any]) -> Dict[str, Any]:
             'user': get_owner_name(message),
             'user_link': get_owner_link(message),
             'subject': get_subject(message),
-        }
+        },
     }
 
 
 def parse_change_event(change_type: str, message: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
     """ Parses change event. """
-    evt = {}  # type: Dict[str, Any]
-    values = {
+    evt: Dict[str, Any] = {}
+    values: Dict[str, Any] = {
         'user': get_owner_name(message),
         'user_link': get_owner_link(message),
-        'subject': get_subject(message)
-    }  # type: Dict[str, Any]
+        'subject': get_subject(message),
+    }
 
     if change_type in ["description_diff", "points"]:
         event_type = change_type
@@ -216,7 +216,7 @@ def parse_change_event(change_type: str, message: Mapping[str, Any]) -> Optional
             values["old"] = old
         else:
             event_type = "changed_" + change_type
-            values.update({'old': old, 'new': new})
+            values.update(old=old, new=new)
 
     elif change_type == "is_blocked":
         if message["change"]["diff"]["is_blocked"]["to"]:
@@ -233,12 +233,12 @@ def parse_change_event(change_type: str, message: Mapping[str, Any]) -> Optional
     elif change_type == "user_story":
         old, new = get_old_and_new_values(change_type, message)
         event_type = "changed_us"
-        values.update({'old': old, 'new': new})
+        values.update(old=old, new=new)
 
     elif change_type in ["subject", 'name']:
         event_type = 'renamed'
         old, new = get_old_and_new_values(change_type, message)
-        values.update({'old': old, 'new': new})
+        values.update(old=old, new=new)
 
     elif change_type in ["estimated_finish", "estimated_start", "due_date"]:
         old, new = get_old_and_new_values(change_type, message)
@@ -247,7 +247,7 @@ def parse_change_event(change_type: str, message: Mapping[str, Any]) -> Optional
             values["new"] = new
         elif not old == new:
             event_type = change_type
-            values.update({'old': old, 'new': new})
+            values.update(old=old, new=new)
         else:
             # date hasn't changed
             return None
@@ -255,13 +255,13 @@ def parse_change_event(change_type: str, message: Mapping[str, Any]) -> Optional
     elif change_type in ["priority", "severity", "type", "status"]:
         event_type = 'changed_' + change_type
         old, new = get_old_and_new_values(change_type, message)
-        values.update({'old': old, 'new': new})
+        values.update(old=old, new=new)
 
     else:
         # we are not supporting this type of event
         return None
 
-    evt.update({"type": message["type"], "event": event_type, "values": values})
+    evt.update(type=message["type"], event=event_type, values=values)
     return evt
 
 def parse_webhook_test(message: Mapping[str, Any]) -> Dict[str, Any]:
@@ -271,8 +271,8 @@ def parse_webhook_test(message: Mapping[str, Any]) -> Dict[str, Any]:
         "values": {
             "user": get_owner_name(message),
             "user_link": get_owner_link(message),
-            "end_type": "test"
-        }
+            "end_type": "test",
+        },
     }
 
 

@@ -1,5 +1,9 @@
+"use strict";
+
+const XDate = require("xdate");
+
 function truncate_precision(float) {
-    return parseFloat(float.toFixed(3));
+    return Number.parseFloat(float.toFixed(3));
 }
 
 exports.now = function () {
@@ -16,13 +20,12 @@ exports.insert_message = function (message) {
 };
 
 exports.get_next_id_float = (function () {
-
     const already_used = new Set();
 
     return function () {
         const local_id_increment = 0.01;
         let latest = page_params.max_message_id;
-        if (typeof message_list.all !== 'undefined' && message_list.all.last() !== undefined) {
+        if (typeof message_list.all !== "undefined" && message_list.all.last() !== undefined) {
             latest = message_list.all.last().id;
         }
         latest = Math.max(0, latest);
@@ -32,25 +35,25 @@ exports.get_next_id_float = (function () {
             // If our id is already used, it is probably an edge case like we had
             // to abort a very recent message.
             blueslip.warn("We don't reuse ids for local echo.");
-            return;
+            return undefined;
         }
 
         if (local_id_float % 1 > local_id_increment * 5) {
             blueslip.warn("Turning off local echo for this message to let host catch up");
-            return;
+            return undefined;
         }
 
         if (local_id_float % 1 === 0) {
             // The logic to stop at 0.05 should prevent us from ever wrapping around
             // to the next integer.
             blueslip.error("Programming error");
-            return;
+            return undefined;
         }
 
         already_used.add(local_id_float);
 
         return local_id_float;
     };
-}());
+})();
 
 window.local_message = exports;

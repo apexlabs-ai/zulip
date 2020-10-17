@@ -2,41 +2,47 @@ import cProfile
 import logging
 import time
 import traceback
-from typing import Any, AnyStr, Dict, \
-    Iterable, List, MutableMapping, Optional
+from typing import Any, AnyStr, Callable, Dict, Iterable, List, MutableMapping, Optional, Union
 
 from django.conf import settings
-from django.core.exceptions import DisallowedHost
+from django.conf.urls.i18n import is_language_prefix_patterns_used
+from django.core.handlers.wsgi import WSGIRequest
 from django.db import connection
-from django.http import HttpRequest, HttpResponse, StreamingHttpResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, StreamingHttpResponse
 from django.middleware.common import CommonMiddleware
+from django.middleware.locale import LocaleMiddleware as DjangoLocaleMiddleware
 from django.shortcuts import render
+from django.utils import translation
+from django.utils.cache import patch_vary_headers
 from django.utils.deprecation import MiddlewareMixin
 from django.utils.translation import ugettext as _
 from django.views.csrf import csrf_failure as html_csrf_failure
+from sentry_sdk import capture_exception
+from sentry_sdk.integrations.logging import ignore_logger
 
-from zerver.lib.bugdown import get_bugdown_requests, get_bugdown_time
 from zerver.lib.cache import get_remote_cache_requests, get_remote_cache_time
-from zerver.lib.debug import maybe_tracemalloc_listen
 from zerver.lib.db import reset_queries
-from zerver.lib.exceptions import ErrorCode, JsonableError, RateLimited
+from zerver.lib.debug import maybe_tracemalloc_listen
+from zerver.lib.exceptions import ErrorCode, JsonableError, MissingAuthenticationError, RateLimited
 from zerver.lib.html_to_text import get_content_description
-from zerver.lib.queue import queue_json_publish
+from zerver.lib.markdown import get_markdown_requests, get_markdown_time
 from zerver.lib.rate_limiter import RateLimitResult
-from zerver.lib.response import json_error, json_response_from_error
+from zerver.lib.request import set_request, unset_request
+from zerver.lib.response import json_error, json_response_from_error, json_unauthorized
 from zerver.lib.subdomains import get_subdomain
-from zerver.lib.utils import statsd
 from zerver.lib.types import ViewFuncT
+from zerver.lib.utils import statsd
 from zerver.models import Realm, flush_per_request_caches, get_realm
 
 logger = logging.getLogger('zulip.requests')
+slow_query_logger = logging.getLogger('zulip.slow_queries')
 
 def record_request_stop_data(log_data: MutableMapping[str, Any]) -> None:
     log_data['time_stopped'] = time.time()
     log_data['remote_cache_time_stopped'] = get_remote_cache_time()
     log_data['remote_cache_requests_stopped'] = get_remote_cache_requests()
-    log_data['bugdown_time_stopped'] = get_bugdown_time()
-    log_data['bugdown_requests_stopped'] = get_bugdown_requests()
+    log_data['markdown_time_stopped'] = get_markdown_time()
+    log_data['markdown_requests_stopped'] = get_markdown_requests()
     if settings.PROFILE_ALL_REQUESTS:
         log_data["prof"].disable()
 
@@ -49,8 +55,8 @@ def record_request_restart_data(log_data: MutableMapping[str, Any]) -> None:
     log_data['time_restarted'] = time.time()
     log_data['remote_cache_time_restarted'] = get_remote_cache_time()
     log_data['remote_cache_requests_restarted'] = get_remote_cache_requests()
-    log_data['bugdown_time_restarted'] = get_bugdown_time()
-    log_data['bugdown_requests_restarted'] = get_bugdown_requests()
+    log_data['markdown_time_restarted'] = get_markdown_time()
+    log_data['markdown_requests_restarted'] = get_markdown_requests()
 
 def async_request_timer_restart(request: HttpRequest) -> None:
     if "time_restarted" in request._log_data:
@@ -68,16 +74,16 @@ def record_request_start_data(log_data: MutableMapping[str, Any]) -> None:
     log_data['time_started'] = time.time()
     log_data['remote_cache_time_start'] = get_remote_cache_time()
     log_data['remote_cache_requests_start'] = get_remote_cache_requests()
-    log_data['bugdown_time_start'] = get_bugdown_time()
-    log_data['bugdown_requests_start'] = get_bugdown_requests()
+    log_data['markdown_time_start'] = get_markdown_time()
+    log_data['markdown_requests_start'] = get_markdown_requests()
 
 def timedelta_ms(timedelta: float) -> float:
     return timedelta * 1000
 
 def format_timedelta(timedelta: float) -> str:
     if (timedelta >= 1):
-        return "%.1fs" % (timedelta,)
-    return "%.0fms" % (timedelta_ms(timedelta),)
+        return f"{timedelta:.1f}s"
+    return f"{timedelta_ms(timedelta):.0f}ms"
 
 def is_slow_query(time_delta: float, path: str) -> bool:
     if time_delta < 1.2:
@@ -98,7 +104,7 @@ statsd_blacklisted_requests = [
     'eventslast_event_id', 'webreq.content', 'avatar', 'user_uploads',
     'password.reset', 'static', 'json.bots', 'json.users', 'json.streams',
     'accounts.unsubscribe', 'apple-touch-icon', 'emoji', 'json.bots',
-    'upload_file', 'realm_activity', 'user_activity'
+    'upload_file', 'realm_activity', 'user_activity',
 ]
 
 def write_log_line(log_data: MutableMapping[str, Any], path: str, method: str, remote_ip: str,
@@ -114,7 +120,7 @@ def write_log_line(log_data: MutableMapping[str, Any], path: str, method: str, r
         if path == '/':
             statsd_path = 'webreq'
         else:
-            statsd_path = "webreq.%s" % (path[1:].replace('/', '.'),)
+            statsd_path = "webreq.{}".format(path[1:].replace('/', '.'))
             # Remove non-ascii chars from path (there should be none, if there are it's
             # because someone manually entered a nonexistent path), as UTF-8 chars make
             # statsd sad when it sends the key name over the socket
@@ -135,7 +141,7 @@ def write_log_line(log_data: MutableMapping[str, Any], path: str, method: str, r
         orig_time_delta = time_delta
         time_delta = ((log_data['time_stopped'] - log_data['time_started']) +
                       (time.time() - log_data['time_restarted']))
-        optional_orig_delta = " (lp: %s)" % (format_timedelta(orig_time_delta),)
+        optional_orig_delta = f" (lp: {format_timedelta(orig_time_delta)})"
     remote_cache_output = ""
     if 'remote_cache_time_start' in log_data:
         remote_cache_time_delta = get_remote_cache_time() - log_data['remote_cache_time_start']
@@ -148,74 +154,65 @@ def write_log_line(log_data: MutableMapping[str, Any], path: str, method: str, r
                                          log_data['remote_cache_requests_restarted'])
 
         if (remote_cache_time_delta > 0.005):
-            remote_cache_output = " (mem: %s/%s)" % (format_timedelta(remote_cache_time_delta),
-                                                     remote_cache_count_delta)
+            remote_cache_output = f" (mem: {format_timedelta(remote_cache_time_delta)}/{remote_cache_count_delta})"
 
         if not suppress_statsd:
-            statsd.timing("%s.remote_cache.time" % (statsd_path,), timedelta_ms(remote_cache_time_delta))
-            statsd.incr("%s.remote_cache.querycount" % (statsd_path,), remote_cache_count_delta)
+            statsd.timing(f"{statsd_path}.remote_cache.time", timedelta_ms(remote_cache_time_delta))
+            statsd.incr(f"{statsd_path}.remote_cache.querycount", remote_cache_count_delta)
 
     startup_output = ""
     if 'startup_time_delta' in log_data and log_data["startup_time_delta"] > 0.005:
-        startup_output = " (+start: %s)" % (format_timedelta(log_data["startup_time_delta"]),)
+        startup_output = " (+start: {})".format(format_timedelta(log_data["startup_time_delta"]))
 
-    bugdown_output = ""
-    if 'bugdown_time_start' in log_data:
-        bugdown_time_delta = get_bugdown_time() - log_data['bugdown_time_start']
-        bugdown_count_delta = get_bugdown_requests() - log_data['bugdown_requests_start']
-        if 'bugdown_requests_stopped' in log_data:
+    markdown_output = ""
+    if 'markdown_time_start' in log_data:
+        markdown_time_delta = get_markdown_time() - log_data['markdown_time_start']
+        markdown_count_delta = get_markdown_requests() - log_data['markdown_requests_start']
+        if 'markdown_requests_stopped' in log_data:
             # (now - restarted) + (stopped - start) = (now - start) + (stopped - restarted)
-            bugdown_time_delta += (log_data['bugdown_time_stopped'] -
-                                   log_data['bugdown_time_restarted'])
-            bugdown_count_delta += (log_data['bugdown_requests_stopped'] -
-                                    log_data['bugdown_requests_restarted'])
+            markdown_time_delta += (log_data['markdown_time_stopped'] -
+                                    log_data['markdown_time_restarted'])
+            markdown_count_delta += (log_data['markdown_requests_stopped'] -
+                                     log_data['markdown_requests_restarted'])
 
-        if (bugdown_time_delta > 0.005):
-            bugdown_output = " (md: %s/%s)" % (format_timedelta(bugdown_time_delta),
-                                               bugdown_count_delta)
+        if (markdown_time_delta > 0.005):
+            markdown_output = f" (md: {format_timedelta(markdown_time_delta)}/{markdown_count_delta})"
 
             if not suppress_statsd:
-                statsd.timing("%s.markdown.time" % (statsd_path,), timedelta_ms(bugdown_time_delta))
-                statsd.incr("%s.markdown.count" % (statsd_path,), bugdown_count_delta)
+                statsd.timing(f"{statsd_path}.markdown.time", timedelta_ms(markdown_time_delta))
+                statsd.incr(f"{statsd_path}.markdown.count", markdown_count_delta)
 
     # Get the amount of time spent doing database queries
     db_time_output = ""
     queries = connection.connection.queries if connection.connection is not None else []
     if len(queries) > 0:
         query_time = sum(float(query.get('time', 0)) for query in queries)
-        db_time_output = " (db: %s/%sq)" % (format_timedelta(query_time),
-                                            len(queries))
+        db_time_output = f" (db: {format_timedelta(query_time)}/{len(queries)}q)"
 
         if not suppress_statsd:
             # Log ms, db ms, and num queries to statsd
-            statsd.timing("%s.dbtime" % (statsd_path,), timedelta_ms(query_time))
-            statsd.incr("%s.dbq" % (statsd_path,), len(queries))
-            statsd.timing("%s.total" % (statsd_path,), timedelta_ms(time_delta))
+            statsd.timing(f"{statsd_path}.dbtime", timedelta_ms(query_time))
+            statsd.incr(f"{statsd_path}.dbq", len(queries))
+            statsd.timing(f"{statsd_path}.total", timedelta_ms(time_delta))
 
     if 'extra' in log_data:
-        extra_request_data = " %s" % (log_data['extra'],)
+        extra_request_data = " {}".format(log_data['extra'])
     else:
         extra_request_data = ""
-    logger_client = "(%s via %s)" % (requestor_for_logs, client_name)
-    logger_timing = ('%5s%s%s%s%s%s %s' %
-                     (format_timedelta(time_delta), optional_orig_delta,
-                      remote_cache_output, bugdown_output,
-                      db_time_output, startup_output, path))
-    logger_line = ('%-15s %-7s %3d %s%s %s' %
-                   (remote_ip, method, status_code,
-                    logger_timing, extra_request_data, logger_client))
+    logger_client = f"({requestor_for_logs} via {client_name})"
+    logger_timing = f'{format_timedelta(time_delta):>5}{optional_orig_delta}{remote_cache_output}{markdown_output}{db_time_output}{startup_output} {path}'
+    logger_line = f'{remote_ip:<15} {method:<7} {status_code:3} {logger_timing}{extra_request_data} {logger_client}'
     if (status_code in [200, 304] and method == "GET" and path.startswith("/static")):
         logger.debug(logger_line)
     else:
         logger.info(logger_line)
 
     if (is_slow_query(time_delta, path)):
-        queue_json_publish("slow_queries", dict(
-            query="%s (%s)" % (logger_line, requestor_for_logs)))
+        slow_query_logger.info(logger_line)
 
     if settings.PROFILE_ALL_REQUESTS:
         log_data["prof"].disable()
-        profile_path = "/tmp/profile.data.%s.%s" % (path.split("/")[-1], int(time_delta * 1000),)
+        profile_path = "/tmp/profile.data.{}.{}".format(path.split("/")[-1], int(time_delta * 1000))
         log_data["prof"].dump_stats(profile_path)
 
     # Log some additional data whenever we return certain 40x errors
@@ -230,7 +227,15 @@ def write_log_line(log_data: MutableMapping[str, Any], path: str, method: str, r
             error_data = repr(b''.join(error_content_list))
         if len(error_data) > 200:
             error_data = "[content more than 200 characters]"
-        logger.info('status=%3d, data=%s, uid=%s' % (status_code, error_data, requestor_for_logs))
+        logger.info('status=%3d, data=%s, uid=%s', status_code, error_data, requestor_for_logs)
+
+class RequestContext(MiddlewareMixin):
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        set_request(request)
+        try:
+            return self.get_response(request)
+        finally:
+            unset_request()
 
 class LogRequests(MiddlewareMixin):
     # We primarily are doing logging using the process_view hook, but
@@ -247,7 +252,7 @@ class LogRequests(MiddlewareMixin):
             # Avoid re-initializing request._log_data if it's already there.
             return
 
-        request._log_data = dict()
+        request._log_data = {}
         record_request_start_data(request._log_data)
 
     def process_view(self, request: HttpRequest, view_func: ViewFuncT,
@@ -276,10 +281,7 @@ class LogRequests(MiddlewareMixin):
             # intends to block, so we stop here to avoid unnecessary work.
             return response
 
-        # The reverse proxy might have sent us the real external IP
-        remote_ip = request.META.get('HTTP_X_REAL_IP')
-        if remote_ip is None:
-            remote_ip = request.META['REMOTE_ADDR']
+        remote_ip = request.META['REMOTE_ADDR']
 
         # Get the requestor's identifier and client, if available.
         try:
@@ -288,7 +290,7 @@ class LogRequests(MiddlewareMixin):
             if hasattr(request, 'user') and hasattr(request.user, 'format_requestor_for_logs'):
                 requestor_for_logs = request.user.format_requestor_for_logs()
             else:
-                requestor_for_logs = "unauth@%s" % (get_subdomain(request) or 'root',)
+                requestor_for_logs = "unauth@{}".format(get_subdomain(request) or 'root')
         try:
             client = request.client.name
         except Exception:
@@ -307,11 +309,34 @@ class LogRequests(MiddlewareMixin):
         return response
 
 class JsonErrorHandler(MiddlewareMixin):
+    def __init__(self, get_response: Callable[[Any, WSGIRequest], Union[HttpResponse, BaseException]]) -> None:
+        super().__init__(get_response)
+        ignore_logger("zerver.middleware.json_error_handler")
+
     def process_exception(self, request: HttpRequest, exception: Exception) -> Optional[HttpResponse]:
+        if isinstance(exception, MissingAuthenticationError):
+            if 'text/html' in request.META.get('HTTP_ACCEPT', ''):
+                # If this looks like a request from a top-level page in a
+                # browser, send the user to the login page.
+                #
+                # TODO: The next part is a bit questionable; it will
+                # execute the likely intent for intentionally visiting
+                # an API endpoint without authentication in a browser,
+                # but that's an unlikely to be done intentionally often.
+                return HttpResponseRedirect(f'{settings.HOME_NOT_LOGGED_IN}?next={request.path}')
+            if request.path.startswith("/api"):
+                # For API routes, ask for HTTP basic auth (email:apiKey).
+                return json_unauthorized()
+            else:
+                # For /json routes, ask for session authentication.
+                return json_unauthorized(www_authenticate='session')
+
         if isinstance(exception, JsonableError):
             return json_response_from_error(exception)
         if request.error_format == "JSON":
-            logging.error(traceback.format_exc(), extra=dict(request=request))
+            capture_exception(exception)
+            json_error_logger = logging.getLogger("zerver.middleware.json_error_handler")
+            json_error_logger.error(traceback.format_exc(), extra=dict(request=request))
             return json_error(_("Internal server error"), status=500)
         return None
 
@@ -332,7 +357,7 @@ class CsrfFailureError(JsonableError):
     data_fields = ['reason']
 
     def __init__(self, reason: str) -> None:
-        self.reason = reason  # type: str
+        self.reason: str = reason
 
     @staticmethod
     def msg_format() -> str:
@@ -344,18 +369,33 @@ def csrf_failure(request: HttpRequest, reason: str="") -> HttpResponse:
     else:
         return html_csrf_failure(request, reason)
 
+class LocaleMiddleware(DjangoLocaleMiddleware):
+    def process_response(self, request: HttpRequest, response: HttpResponse) -> HttpResponse:
+        # This is the same as the default LocaleMiddleware, minus the
+        # logic that redirects 404's that lack a prefixed language in
+        # the path into having a language.  See
+        # https://code.djangoproject.com/ticket/32005
+        language = translation.get_language()
+        language_from_path = translation.get_language_from_path(request.path_info)
+        urlconf = getattr(request, 'urlconf', settings.ROOT_URLCONF)
+        i18n_patterns_used, _ = is_language_prefix_patterns_used(urlconf)
+        if not (i18n_patterns_used and language_from_path):
+            patch_vary_headers(response, ('Accept-Language',))
+        response.setdefault('Content-Language', language)
+        return response
+
 class RateLimitMiddleware(MiddlewareMixin):
     def set_response_headers(self, response: HttpResponse,
                              rate_limit_results: List[RateLimitResult]) -> None:
         # The limit on the action that was requested is the minimum of the limits that get applied:
-        limit = min([result.entity.max_api_calls() for result in rate_limit_results])
+        limit = min(result.entity.max_api_calls() for result in rate_limit_results)
         response['X-RateLimit-Limit'] = str(limit)
         # Same principle applies to remaining api calls:
-        remaining_api_calls = min([result.remaining for result in rate_limit_results])
+        remaining_api_calls = min(result.remaining for result in rate_limit_results)
         response['X-RateLimit-Remaining'] = str(remaining_api_calls)
 
         # The full reset time is the maximum of the reset times for the limits that get applied:
-        reset_time = time.time() + max([result.secs_to_freedom for result in rate_limit_results])
+        reset_time = time.time() + max(result.secs_to_freedom for result in rate_limit_results)
         response['X-RateLimit-Reset'] = str(int(reset_time))
 
     def process_response(self, request: HttpRequest, response: HttpResponse) -> HttpResponse:
@@ -371,11 +411,12 @@ class RateLimitMiddleware(MiddlewareMixin):
     def process_exception(self, request: HttpRequest,
                           exception: Exception) -> Optional[HttpResponse]:
         if isinstance(exception, RateLimited):
-            secs_to_freedom = float(str(exception))  # secs_to_freedom is passed to RateLimited when raising
+            # secs_to_freedom is passed to RateLimited when raising
+            secs_to_freedom = float(str(exception))
             resp = json_error(
                 _("API usage exceeded rate limit"),
                 data={'retry-after': secs_to_freedom},
-                status=429
+                status=429,
             )
             resp['Retry-After'] = secs_to_freedom
             return resp
@@ -389,32 +430,28 @@ class FlushDisplayRecipientCache(MiddlewareMixin):
         return response
 
 class HostDomainMiddleware(MiddlewareMixin):
-    def process_response(self, request: HttpRequest, response: HttpResponse) -> HttpResponse:
-        if getattr(response, "asynchronous", False):
-            # This special Tornado "asynchronous" response is
-            # discarded after going through this code path as Tornado
-            # intends to block, so we stop here to avoid unnecessary work.
-            return response
+    def process_request(self, request: HttpRequest) -> Optional[HttpResponse]:
+        # Match against ALLOWED_HOSTS, which is rather permissive;
+        # failure will raise DisallowedHost, which is a 400.
+        request.get_host()
 
-        try:
-            request.get_host()
-        except DisallowedHost:
-            # If we get a DisallowedHost exception trying to access
-            # the host, (1) the request is failed anyway and so the
-            # below code will do nothing, and (2) the below will
-            # trigger a recursive exception, breaking things, so we
-            # just return here.
-            return response
+        # This check is important to avoid doing the extra work of
+        # `get_realm` (which does a database query that could be
+        # problematic for Tornado).  Also the error page below is only
+        # appropriate for a page visited in a browser, not the API.
+        #
+        # API authentication will end up checking for an invalid
+        # realm, and throw a JSON-format error if appropriate.
+        if request.path.startswith(("/static/", "/api/", "/json/")):
+            return None
 
-        if (not request.path.startswith("/static/") and not request.path.startswith("/api/") and
-                not request.path.startswith("/json/")):
-            subdomain = get_subdomain(request)
-            if subdomain != Realm.SUBDOMAIN_FOR_ROOT_DOMAIN:
-                try:
-                    get_realm(subdomain)
-                except Realm.DoesNotExist:
-                    return render(request, "zerver/invalid_realm.html", status=404)
-        return response
+        subdomain = get_subdomain(request)
+        if subdomain != Realm.SUBDOMAIN_FOR_ROOT_DOMAIN:
+            try:
+                request.realm = get_realm(subdomain)
+            except Realm.DoesNotExist:
+                return render(request, "zerver/invalid_realm.html", status=404)
+        return None
 
 class SetRemoteAddrFromForwardedFor(MiddlewareMixin):
     """
@@ -425,6 +462,7 @@ class SetRemoteAddrFromForwardedFor(MiddlewareMixin):
     is set in the request, then it has properly been set by NGINX.
     Therefore HTTP_X_FORWARDED_FOR's value is trusted.
     """
+
     def process_request(self, request: HttpRequest) -> None:
         try:
             real_ip = request.META['HTTP_X_FORWARDED_FOR']
@@ -465,6 +503,7 @@ class ZulipCommonMiddleware(CommonMiddleware):
     for non-API endpoints things like /login.  But doing that
     transition will require more careful testing.
     """
+
     def should_redirect_with_slash(self, request: HttpRequest) -> bool:
         if settings.RUNNING_INSIDE_TORNADO:
             return False

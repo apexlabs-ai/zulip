@@ -11,26 +11,21 @@ class Command(ZulipBaseCommand):
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument('-e', '--email',
-                            dest='email',
                             help="Email account of user.")
         parser.add_argument('-a', '--api-key',
-                            dest='api_key',
                             help="API key of user.")
         parser.add_argument('-s', '--seconds',
-                            dest='seconds',
                             default=60,
                             type=int,
                             help="Seconds to block for.")
         parser.add_argument('-d', '--domain',
-                            dest='domain',
                             default='api_by_user',
                             help="Rate-limiting domain. Defaults to 'api_by_user'.")
         parser.add_argument('-b', '--all-bots',
                             dest='bots',
                             action='store_true',
-                            default=False,
                             help="Whether or not to also block all bots for this user.")
-        parser.add_argument('operation', metavar='<operation>', type=str, choices=['block', 'unblock'],
+        parser.add_argument('operation', metavar='<operation>', choices=['block', 'unblock'],
                             help="operation to perform (block or unblock)")
         self.add_realm_args(parser)
 
@@ -46,7 +41,7 @@ class Command(ZulipBaseCommand):
             try:
                 user_profile = get_user_profile_by_api_key(options['api_key'])
             except UserProfile.DoesNotExist:
-                raise CommandError("Unable to get user profile for api key %s" % (options['api_key'],))
+                raise CommandError("Unable to get user profile for api key {}".format(options['api_key']))
 
         users = [user_profile]
         if options['bots']:
@@ -55,7 +50,7 @@ class Command(ZulipBaseCommand):
 
         operation = options['operation']
         for user in users:
-            print("Applying operation to User ID: %s: %s" % (user.id, operation))
+            print(f"Applying operation to User ID: {user.id}: {operation}")
 
             if operation == 'block':
                 RateLimitedUser(user, domain=options['domain']).block_access(options['seconds'])

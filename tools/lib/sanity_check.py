@@ -2,16 +2,10 @@ import os
 import pwd
 import sys
 
+
 def check_venv(filename: str) -> None:
-    try:
-        import django
-        import ujson
-        import zulip
-        django
-        ujson
-        zulip
-    except ImportError:
-        print("You need to run %s inside a Zulip dev environment." % (filename,))
+    if os.path.basename(sys.prefix) != "zulip-py3-venv":
+        print(f"You need to run {filename} inside a Zulip dev environment.")
         user_id = os.getuid()
         user_name = pwd.getpwuid(user_id).pw_name
         if user_name != 'vagrant' and user_name != 'zulipdev':

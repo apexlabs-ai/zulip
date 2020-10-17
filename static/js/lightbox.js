@@ -1,3 +1,7 @@
+"use strict";
+
+const people = require("./people");
+
 let is_open = false;
 // the asset map is a map of all retrieved images and YouTube videos that are
 // memoized instead of being looked up multiple times.
@@ -8,14 +12,14 @@ function render_lightbox_list_images(preview_source) {
         const images = Array.prototype.slice.call($(".focused_table .message_inline_image img"));
         const $image_list = $("#lightbox_overlay .image-list").html("");
 
-        images.forEach(function (img) {
+        images.forEach((img) => {
             const src = img.getAttribute("src");
             const className = preview_source === src ? "image selected" : "image";
 
             const node = $("<div></div>", {
                 class: className,
                 "data-src": src,
-            }).css({ backgroundImage: "url(" + src + ")"});
+            }).css({backgroundImage: "url(" + src + ")"});
 
             $image_list.append(node);
 
@@ -38,7 +42,7 @@ function display_image(payload) {
 
     if (lightbox_canvas === true) {
         const canvas = document.createElement("canvas");
-        canvas.setAttribute("data-src", payload.source);
+        canvas.dataset.src = payload.source;
 
         $("#lightbox_overlay .image-preview").html(canvas).show();
         const photo = new LightboxCanvas(canvas);
@@ -59,7 +63,9 @@ function display_image(payload) {
 function display_video(payload) {
     render_lightbox_list_images(payload.preview);
 
-    $("#lightbox_overlay .image-preview, .image-description, .download, .lightbox-canvas-trigger").hide();
+    $(
+        "#lightbox_overlay .image-preview, .image-description, .download, .lightbox-canvas-trigger",
+    ).hide();
 
     let source;
     if (payload.type === "youtube-video") {
@@ -68,14 +74,19 @@ function display_video(payload) {
         source = "https://player.vimeo.com/video/" + payload.source;
     } else if (payload.type === "embed-video") {
         // Use data: to load the player in a unique origin for security.
-        source = "data:text/html," + window.encodeURIComponent(
-            "<!DOCTYPE html><style>iframe{position:absolute;left:0;top:0;width:100%;height:100%;box-sizing:border-box}</style>" +
-                payload.source
-        );
+        source =
+            "data:text/html," +
+            window.encodeURIComponent(
+                "<!DOCTYPE html><style>iframe{position:absolute;left:0;top:0;width:100%;height:100%;box-sizing:border-box}</style>" +
+                    payload.source,
+            );
     }
 
     const iframe = $("<iframe></iframe>");
-    iframe.attr("sandbox", "allow-forms allow-modals allow-orientation-lock allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-presentation allow-same-origin allow-scripts");
+    iframe.attr(
+        "sandbox",
+        "allow-forms allow-modals allow-orientation-lock allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-presentation allow-same-origin allow-scripts",
+    );
     iframe.attr("src", source);
     iframe.attr("frameborder", 0);
     iframe.attr("allowfullscreen", true);
@@ -126,7 +137,7 @@ exports.open = function ($image) {
     }
 
     overlays.open_overlay({
-        name: 'lightbox',
+        name: "lightbox",
         overlay: $("#lightbox_overlay"),
         on_close: lightbox_close_overlay,
     });
@@ -185,14 +196,14 @@ exports.parse_image_data = function (image) {
 
     if (asset_map.has($preview_src)) {
         // check if image's data is already present in asset_map.
-        return;
+        return asset_map.get($preview_src);
     }
 
     // if wrapped in the .youtube-video class, it will be length = 1, and therefore
     // cast to true.
-    const is_youtube_video = !!$image.closest(".youtube-video").length;
-    const is_vimeo_video = !!$image.closest(".vimeo-video").length;
-    const is_embed_video = !!$image.closest(".embed-video").length;
+    const is_youtube_video = Boolean($image.closest(".youtube-video").length);
+    const is_vimeo_video = Boolean($image.closest(".vimeo-video").length);
+    const is_embed_video = Boolean($image.closest(".embed-video").length);
 
     // check if image is descendent of #preview_content
     const is_compose_preview_image = $image.closest("#preview_content").length === 1;
@@ -246,11 +257,11 @@ exports.parse_image_data = function (image) {
 };
 
 exports.prev = function () {
-    $(".image-list .image.selected").prev().click();
+    $(".image-list .image.selected").prev().trigger("click");
 };
 
 exports.next = function () {
-    $(".image-list .image.selected").next().click();
+    $(".image-list .image.selected").next().trigger("click");
 };
 
 // this is a block of events that are required for the lightbox to work.
@@ -264,13 +275,13 @@ exports.initialize = function () {
         exports.open($img);
     });
 
-    $("#lightbox_overlay .download").click(function () {
+    $("#lightbox_overlay .download").on("click", function () {
         this.blur();
     });
 
     $("#lightbox_overlay").on("click", ".image-list .image", function () {
         const $image_list = $(this).parent();
-        const $original_image = $(".message_row img[src='" + $(this).attr('data-src') + "']");
+        const $original_image = $(".message_row img[src='" + $(this).attr("data-src") + "']");
 
         exports.open($original_image);
 
@@ -286,21 +297,24 @@ exports.initialize = function () {
 
         if (coords.right > parentOffset) {
             // add 2px margin
-            $image_list.animate({
-                scrollLeft: coords.right - this.parentNode.clientWidth + 2,
-            }, 100);
+            $image_list.animate(
+                {
+                    scrollLeft: coords.right - this.parentNode.clientWidth + 2,
+                },
+                100,
+            );
         } else if (coords.left < this.parentNode.scrollLeft) {
             // subtract 2px margin
-            $image_list.animate({ scrollLeft: coords.left - 2 }, 100);
+            $image_list.animate({scrollLeft: coords.left - 2}, 100);
         }
     });
 
     $("#lightbox_overlay").on("click", ".center .arrow", function () {
         const direction = $(this).attr("data-direction");
 
-        if (direction === 'next') {
+        if (direction === "next") {
             exports.next();
-        } else if (direction === 'prev') {
+        } else if (direction === "prev") {
             exports.prev();
         }
     });
@@ -321,8 +335,8 @@ exports.initialize = function () {
         }
     });
 
-    $("#lightbox_overlay .image-preview").on("dblclick", "img, canvas", function (e) {
-        $("#lightbox_overlay .lightbox-canvas-trigger").click();
+    $("#lightbox_overlay .image-preview").on("dblclick", "img, canvas", (e) => {
+        $("#lightbox_overlay .lightbox-canvas-trigger").trigger("click");
         e.preventDefault();
     });
 
@@ -332,7 +346,7 @@ exports.initialize = function () {
         }
     });
 
-    $("#lightbox_overlay").on("click", ".image-info-wrapper, .center", function (e) {
+    $("#lightbox_overlay").on("click", ".image-info-wrapper, .center", (e) => {
         if ($(e.target).is(".image-info-wrapper, .center")) {
             overlays.close_overlay("lightbox");
         }

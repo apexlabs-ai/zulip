@@ -1,12 +1,16 @@
+"use strict";
+
+const pm_conversations = require("./pm_conversations");
+
 exports.sub_list_generator = function (lst, lower, upper) {
     // lower/upper has Python range semantics so if you pass
     // in lower=5 and upper=8, you get elements 5/6/7
     let i = lower;
 
     return {
-        next: function () {
+        next() {
             if (i >= upper) {
-                return;
+                return undefined;
             }
             const res = lst[i];
             i += 1;
@@ -21,9 +25,9 @@ exports.reverse_sub_list_generator = function (lst, lower, upper) {
     let i = upper - 1;
 
     return {
-        next: function () {
+        next() {
             if (i < lower) {
-                return;
+                return undefined;
             }
             const res = lst[i];
             i -= 1;
@@ -45,13 +49,13 @@ exports.fchain = function (outer_gen, get_inner_gen) {
     let inner_gen;
 
     return {
-        next: function () {
+        next() {
             while (outer_val !== undefined) {
                 if (inner_gen === undefined) {
                     inner_gen = get_inner_gen(outer_val);
                     if (!inner_gen || !inner_gen.next) {
-                        blueslip.error('Invalid generator returned.');
-                        return;
+                        blueslip.error("Invalid generator returned.");
+                        return undefined;
                     }
                 }
                 const inner = inner_gen.next();
@@ -61,6 +65,7 @@ exports.fchain = function (outer_gen, get_inner_gen) {
                 outer_val = outer_gen.next();
                 inner_gen = undefined;
             }
+            return undefined;
         },
     };
 };
@@ -131,11 +136,11 @@ exports.reverse_wrap_exclude = function (lst, val) {
 
 exports.filter = function (gen, filter_func) {
     return {
-        next: function () {
+        next() {
             while (true) {
                 const val = gen.next();
                 if (val === undefined) {
-                    return;
+                    return undefined;
                 }
                 if (filter_func(val)) {
                     return val;
@@ -147,10 +152,10 @@ exports.filter = function (gen, filter_func) {
 
 exports.map = function (gen, map_func) {
     return {
-        next: function () {
+        next() {
             const val = gen.next();
             if (val === undefined) {
-                return;
+                return undefined;
             }
             return map_func(val);
         },
@@ -176,7 +181,7 @@ exports.next_topic = function (streams, get_topics, has_unread_messages, curr_st
         function make_object(topic) {
             return {
                 stream: which_stream,
-                topic: topic,
+                topic,
             };
         }
 
@@ -193,11 +198,11 @@ exports.next_topic = function (streams, get_topics, has_unread_messages, curr_st
 exports.get_next_topic = function (curr_stream, curr_topic) {
     let my_streams = stream_sort.get_streams();
 
-    my_streams = my_streams.filter(stream_name => {
+    my_streams = my_streams.filter((stream_name) => {
         if (!stream_data.is_stream_muted_by_name(stream_name)) {
             return true;
         }
-        if  (stream_name === curr_stream) {
+        if (stream_name === curr_stream) {
             // We can use n within a muted stream if we are
             // currently narrowed to it.
             return true;
@@ -208,7 +213,7 @@ exports.get_next_topic = function (curr_stream, curr_topic) {
     function get_unmuted_topics(stream_name) {
         const stream_id = stream_data.get_stream_id(stream_name);
         let topics = stream_topic_history.get_recent_topic_names(stream_id);
-        topics = topics.filter(topic => !muting.is_topic_muted(stream_id, topic));
+        topics = topics.filter((topic) => !muting.is_topic_muted(stream_id, topic));
         return topics;
     }
 
@@ -222,7 +227,7 @@ exports.get_next_topic = function (curr_stream, curr_topic) {
         get_unmuted_topics,
         has_unread_messages,
         curr_stream,
-        curr_topic
+        curr_topic,
     );
 };
 

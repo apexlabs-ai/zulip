@@ -114,16 +114,17 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   end
 
   config.vm.provider "virtualbox" do |vb, override|
-    override.vm.box = "ubuntu/bionic64"
-    # An unnecessary log file gets generated when running vagrant up for the
-    # first time with the Ubuntu Bionic box. This looks like it is being
-    # caused upstream by the base box containing a Vagrantfile with a similar
-    # line to the one below.
-    # see https://github.com/hashicorp/vagrant/issues/9425
-    vb.customize [ "modifyvm", :id, "--uartmode1", "disconnected" ]
+    override.vm.box = "hashicorp/bionic64"
     # It's possible we can get away with just 1.5GB; more testing needed
     vb.memory = vm_memory
     vb.cpus = vm_num_cpus
+  end
+
+  config.vm.provider "parallels" do |prl, override|
+	override.vm.box = "bento/ubuntu-18.04"
+	override.vm.box_version = "202005.21.0"
+	prl.memory = vm_memory
+	prl.cpus = vm_num_cpus
   end
 
 $provision_script = <<SCRIPT

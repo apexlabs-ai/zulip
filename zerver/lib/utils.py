@@ -1,22 +1,17 @@
-from typing import Any, Callable, List, Optional, Sequence, TypeVar, Iterable, Set, Tuple
-import base64
 import hashlib
 import heapq
 import itertools
-import os
 import re
-import string
-from time import sleep
+import secrets
 from itertools import zip_longest
+from time import sleep
+from typing import Any, Callable, Iterator, List, Optional, Sequence, Set, Tuple, TypeVar
 
 from django.conf import settings
 
 T = TypeVar('T')
 
-def statsd_key(val: Any, clean_periods: bool=False) -> str:
-    if not isinstance(val, str):
-        val = str(val)
-
+def statsd_key(val: str, clean_periods: bool=False) -> str:
     if ':' in val:
         val = val.split(':')[0]
     val = val.replace('-', "_")
@@ -36,9 +31,9 @@ class StatsDWrapper:
         """Set a gauge value."""
         from django_statsd.clients import statsd
         if delta:
-            value_str = '%+g|g' % (value,)
+            value_str = f'{value:+g}|g'
         else:
-            value_str = '%g|g' % (value,)
+            value_str = f'{value:g}|g'
         statsd._send(stat, value_str, rate)
 
     def __getattr__(self, name: str) -> Any:
@@ -76,7 +71,7 @@ def run_in_batches(all_list: Sequence[T],
         batch = all_list[start:end]
 
         if logger:
-            logger("Executing %s in batch %s of %s" % (end-start, i+1, limit))
+            logger(f"Executing {end-start} in batch {i+1} of {limit}")
 
         callback(batch)
 
@@ -104,17 +99,15 @@ def log_statsd_event(name: str) -> None:
     Note that to draw this event as a vertical line in graphite
     you can use the drawAsInfinite() command
     """
-    event_name = "events.%s" % (name,)
+    event_name = f"events.{name}"
     statsd.incr(event_name)
 
-def generate_random_token(length: int) -> str:
-    return str(base64.b16encode(os.urandom(length // 2)).decode('utf-8').lower())
-
 def generate_api_key() -> str:
-    choices = string.ascii_letters + string.digits
-    altchars = ''.join([choices[ord(os.urandom(1)) % 62] for _ in range(2)]).encode("utf-8")
-    api_key = base64.b64encode(os.urandom(24), altchars=altchars).decode("utf-8")
-    return api_key
+    api_key = ""
+    while len(api_key) < 32:
+        # One iteration suffices 99.4992% of the time.
+        api_key += secrets.token_urlsafe(3 * 9).replace("_", "").replace("-", "")
+    return api_key[:32]
 
 def has_api_key_format(key: str) -> bool:
     return bool(re.fullmatch(r"([A-Za-z0-9]){32}", key))
@@ -122,7 +115,7 @@ def has_api_key_format(key: str) -> bool:
 def query_chunker(queries: List[Any],
                   id_collector: Optional[Set[int]]=None,
                   chunk_size: int=1000,
-                  db_chunk_size: Optional[int]=None) -> Iterable[Any]:
+                  db_chunk_size: Optional[int]=None) -> Iterator[Any]:
     '''
     This merges one or more Django ascending-id queries into
     a generator that returns chunks of chunk_size row objects
@@ -149,11 +142,10 @@ def query_chunker(queries: List[Any],
     else:
         id_collector = set()
 
-    def chunkify(q: Any, i: int) -> Iterable[Tuple[int, int, Any]]:
+    def chunkify(q: Any, i: int) -> Iterator[Tuple[int, int, Any]]:
         q = q.order_by('id')
         min_id = -1
         while True:
-            assert db_chunk_size is not None  # Hint for mypy, but also workaround for mypy bug #3442.
             rows = list(q.filter(id__gt=min_id)[0:db_chunk_size])
             if len(rows) == 0:
                 break

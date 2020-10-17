@@ -1,17 +1,16 @@
-from django.conf import settings
-from django.db.models import Sum
-from django.db.models.query import F
-from django.db.models.functions import Length
-from zerver.models import BotConfigData, UserProfile
-
-from typing import List, Dict, Optional
-
-from collections import defaultdict
-
-import os
-
 import configparser
 import importlib
+import os
+from collections import defaultdict
+from typing import Dict, List, Optional
+
+from django.conf import settings
+from django.db.models import Sum
+from django.db.models.functions import Length
+from django.db.models.query import F
+
+from zerver.models import BotConfigData, UserProfile
+
 
 class ConfigError(Exception):
     pass
@@ -26,7 +25,7 @@ def get_bot_configs(bot_profile_ids: List[int]) -> Dict[int, Dict[str, str]]:
     if not bot_profile_ids:
         return {}
     entries = BotConfigData.objects.filter(bot_profile_id__in=bot_profile_ids)
-    entries_by_uid = defaultdict(dict)  # type: Dict[int, Dict[str, str]]
+    entries_by_uid: Dict[int, Dict[str, str]] = defaultdict(dict)
     for entry in entries:
         entries_by_uid[entry.bot_profile_id].update({entry.key: entry.value})
     return entries_by_uid
@@ -59,14 +58,14 @@ def set_bot_config(bot_profile: UserProfile, key: str, value: str) -> None:
         obj.save()
 
 def load_bot_config_template(bot: str) -> Dict[str, str]:
-    bot_module_name = 'zulip_bots.bots.{}'.format(bot)
+    bot_module_name = f'zulip_bots.bots.{bot}'
     bot_module = importlib.import_module(bot_module_name)
     bot_module_path = os.path.dirname(bot_module.__file__)
-    config_path = os.path.join(bot_module_path, '{}.conf'.format(bot))
+    config_path = os.path.join(bot_module_path, f'{bot}.conf')
     if os.path.isfile(config_path):
         config = configparser.ConfigParser()
         with open(config_path) as conf:
-            config.readfp(conf)
+            config.read_file(conf)
         return dict(config.items(bot))
     else:
-        return dict()
+        return {}

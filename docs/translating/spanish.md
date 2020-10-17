@@ -1,4 +1,4 @@
-# Spanish Translation Style Guide
+# Spanish translation style guide
 
 Use informal Spanish for translation:
 
@@ -20,7 +20,7 @@ Use informal Spanish for translation:
 
 * Balance common verbs and nouns with specific IT-related translations
   of English terms - this can be tricky, try to check how other
-  resources were translated (e.g. GMail, Microsoft websites, Facebook)
+  resources were translated (e.g. Gmail, Microsoft websites, Facebook)
   to decide what wouldn't sound awkward / rude in Spanish.
 
 * Latest RAE rule ("solo" should
@@ -38,9 +38,6 @@ Zulip friendly and usable.
   precise translation, preferably don't use that one. Many users may not
   associate "MP" with *private message* in a group context. Better use it
   without abbreviations.
-* Realm - **Instancia**: the literal Spanish of realm is "reino",
-  which is not a term that's charged with computer
-  terminology. "Instancia" is much clearer.
 * Stream - **Canal**: the use of the literal Spanish word for stream
   "Flujo" is very confusing and not the correct metaphor for Spanish
   speaking people. The correct term would be "canal" (*channel*).

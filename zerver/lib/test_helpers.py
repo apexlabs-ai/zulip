@@ -1,56 +1,68 @@
+import collections
+import os
+import re
+import sys
+import time
 from contextlib import contextmanager
+from functools import wraps
 from typing import (
-    Any, Callable, Dict, Generator, Iterable, Iterator, List, Mapping,
-    Optional, Tuple, Union, IO, TypeVar, TYPE_CHECKING
+    IO,
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    Iterable,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+    cast,
 )
+from unittest import mock
 
-from django.urls import URLResolver
+import boto3
+import fakeldap
+import ldap
+import orjson
+from boto3.resources.base import ServiceResource
 from django.conf import settings
-from django.test import override_settings
-from django.http import HttpResponse, HttpResponseRedirect
 from django.db.migrations.state import StateApps
-from boto.s3.connection import S3Connection
-from boto.s3.bucket import Bucket
+from django.http import HttpResponse, HttpResponseRedirect
+from django.test import override_settings
+from django.urls import URLResolver
+from moto import mock_s3
 
 import zerver.lib.upload
+from zerver.lib import cache
 from zerver.lib.actions import do_set_realm_property
-from zerver.lib.upload import S3UploadBackend, LocalUploadBackend
 from zerver.lib.avatar import avatar_url
 from zerver.lib.cache import get_cache_backend
-from zerver.lib.db import TimeTrackingCursor
-from zerver.lib import cache
-from zerver.tornado import event_queue
-from zerver.tornado.handlers import allocate_handler_id
-from zerver.worker import queue_processors
+from zerver.lib.db import Params, ParamsT, Query, TimeTrackingCursor
 from zerver.lib.integrations import WEBHOOK_INTEGRATIONS
-from zerver.views.auth import get_login_data
-
+from zerver.lib.upload import LocalUploadBackend, S3UploadBackend
 from zerver.models import (
-    get_realm,
-    get_stream,
     Client,
     Message,
     Realm,
     Subscription,
     UserMessage,
     UserProfile,
+    get_realm,
+    get_stream,
 )
+from zerver.tornado import django_api as django_tornado_api
+from zerver.tornado.handlers import AsyncDjangoHandler, allocate_handler_id
+from zerver.worker import queue_processors
+from zproject.backends import ExternalAuthDataDict, ExternalAuthResult
 
 if TYPE_CHECKING:
     # Avoid an import cycle; we only need these for type annotations.
-    from zerver.lib.test_classes import ZulipTestCase, MigrationsTestCase
+    from zerver.lib.test_classes import MigrationsTestCase, ZulipTestCase
 
-import collections
-import mock
-import os
-import re
-import sys
-import time
-import ujson
-from moto import mock_s3_deprecated
-
-import fakeldap
-import ldap
 
 class MockLDAP(fakeldap.MockLDAP):
     class LDAPError(ldap.LDAPError):
@@ -75,22 +87,20 @@ def stub_event_queue_user_events(event_queue_return: Any, user_events_return: An
 
 @contextmanager
 def simulated_queue_client(client: Callable[..., Any]) -> Iterator[None]:
-    real_SimpleQueueClient = queue_processors.SimpleQueueClient
-    queue_processors.SimpleQueueClient = client  # type: ignore # https://github.com/JukkaL/mypy/issues/1152
-    yield
-    queue_processors.SimpleQueueClient = real_SimpleQueueClient  # type: ignore # https://github.com/JukkaL/mypy/issues/1152
+    with mock.patch.object(queue_processors, 'SimpleQueueClient', client):
+        yield
 
 @contextmanager
 def tornado_redirected_to_list(lst: List[Mapping[str, Any]]) -> Iterator[None]:
-    real_event_queue_process_notification = event_queue.process_notification
-    event_queue.process_notification = lambda notice: lst.append(notice)
+    real_event_queue_process_notification = django_tornado_api.process_notification
+    django_tornado_api.process_notification = lambda notice: lst.append(notice)
     # process_notification takes a single parameter called 'notice'.
     # lst.append takes a single argument called 'object'.
     # Some code might call process_notification using keyword arguments,
     # so mypy doesn't allow assigning lst.append to process_notification
     # So explicitly change parameter name to 'notice' to work around this problem
     yield
-    event_queue.process_notification = real_event_queue_process_notification
+    django_tornado_api.process_notification = real_event_queue_process_notification
 
 class EventInfo:
     def populate(self, call_args_list: List[Any]) -> None:
@@ -115,9 +125,26 @@ def capture_event(event_info: EventInfo) -> Iterator[None]:
     event_info.populate(m.call_args_list)
 
 @contextmanager
-def simulated_empty_cache() -> Generator[
-        List[Tuple[str, Union[str, List[str]], str]], None, None]:
-    cache_queries = []  # type: List[Tuple[str, Union[str, List[str]], str]]
+def cache_tries_captured() -> Iterator[List[Tuple[str, Union[str, List[str]], Optional[str]]]]:
+    cache_queries: List[Tuple[str, Union[str, List[str]], Optional[str]]] = []
+
+    orig_get = cache.cache_get
+    orig_get_many = cache.cache_get_many
+
+    def my_cache_get(key: str, cache_name: Optional[str]=None) -> Optional[Dict[str, Any]]:
+        cache_queries.append(('get', key, cache_name))
+        return orig_get(key, cache_name)
+
+    def my_cache_get_many(keys: List[str], cache_name: Optional[str]=None) -> Dict[str, Any]:  # nocoverage -- simulated code doesn't use this
+        cache_queries.append(('getmany', keys, cache_name))
+        return orig_get_many(keys, cache_name)
+
+    with mock.patch.multiple(cache, cache_get=my_cache_get, cache_get_many=my_cache_get_many):
+        yield cache_queries
+
+@contextmanager
+def simulated_empty_cache() -> Iterator[List[Tuple[str, Union[str, List[str]], Optional[str]]]]:
+    cache_queries: List[Tuple[str, Union[str, List[str]], Optional[str]]] = []
 
     def my_cache_get(key: str, cache_name: Optional[str]=None) -> Optional[Dict[str, Any]]:
         cache_queries.append(('get', key, cache_name))
@@ -127,28 +154,23 @@ def simulated_empty_cache() -> Generator[
         cache_queries.append(('getmany', keys, cache_name))
         return {}
 
-    old_get = cache.cache_get
-    old_get_many = cache.cache_get_many
-    cache.cache_get = my_cache_get
-    cache.cache_get_many = my_cache_get_many
-    yield cache_queries
-    cache.cache_get = old_get
-    cache.cache_get_many = old_get_many
+    with mock.patch.multiple(cache, cache_get=my_cache_get, cache_get_many=my_cache_get_many):
+        yield cache_queries
 
 @contextmanager
-def queries_captured(include_savepoints: Optional[bool]=False) -> Generator[
+def queries_captured(include_savepoints: bool=False) -> Generator[
         List[Dict[str, Union[str, bytes]]], None, None]:
     '''
     Allow a user to capture just the queries executed during
     the with statement.
     '''
 
-    queries = []  # type: List[Dict[str, Union[str, bytes]]]
+    queries: List[Dict[str, Union[str, bytes]]] = []
 
     def wrapper_execute(self: TimeTrackingCursor,
-                        action: Callable[[str, Iterable[Any]], None],
-                        sql: str,
-                        params: Iterable[Any]=()) -> None:
+                        action: Callable[[str, ParamsT], None],
+                        sql: Query,
+                        params: ParamsT) -> None:
         cache = get_cache_backend(None)
         cache.clear()
         start = time.time()
@@ -157,29 +179,22 @@ def queries_captured(include_savepoints: Optional[bool]=False) -> Generator[
         finally:
             stop = time.time()
             duration = stop - start
-            if include_savepoints or ('SAVEPOINT' not in sql):
+            if include_savepoints or not isinstance(sql, str) or 'SAVEPOINT' not in sql:
                 queries.append({
                     'sql': self.mogrify(sql, params).decode('utf-8'),
-                    'time': "%.3f" % (duration,),
+                    'time': f"{duration:.3f}",
                 })
 
-    old_execute = TimeTrackingCursor.execute
-    old_executemany = TimeTrackingCursor.executemany
+    def cursor_execute(self: TimeTrackingCursor, sql: Query,
+                       params: Optional[Params]=None) -> None:
+        return wrapper_execute(self, super(TimeTrackingCursor, self).execute, sql, params)
 
-    def cursor_execute(self: TimeTrackingCursor, sql: str,
-                       params: Iterable[Any]=()) -> None:
-        return wrapper_execute(self, super(TimeTrackingCursor, self).execute, sql, params)  # type: ignore # https://github.com/JukkaL/mypy/issues/1167
-    TimeTrackingCursor.execute = cursor_execute  # type: ignore # https://github.com/JukkaL/mypy/issues/1167
+    def cursor_executemany(self: TimeTrackingCursor, sql: Query,
+                           params: Iterable[Params]) -> None:
+        return wrapper_execute(self, super(TimeTrackingCursor, self).executemany, sql, params)  # nocoverage -- doesn't actually get used in tests
 
-    def cursor_executemany(self: TimeTrackingCursor, sql: str,
-                           params: Iterable[Any]=()) -> None:
-        return wrapper_execute(self, super(TimeTrackingCursor, self).executemany, sql, params)  # type: ignore # https://github.com/JukkaL/mypy/issues/1167 # nocoverage -- doesn't actually get used in tests
-    TimeTrackingCursor.executemany = cursor_executemany  # type: ignore # https://github.com/JukkaL/mypy/issues/1167
-
-    yield queries
-
-    TimeTrackingCursor.execute = old_execute  # type: ignore # https://github.com/JukkaL/mypy/issues/1167
-    TimeTrackingCursor.executemany = old_executemany  # type: ignore # https://github.com/JukkaL/mypy/issues/1167
+    with mock.patch.multiple(TimeTrackingCursor, execute=cursor_execute, executemany=cursor_executemany):
+        yield queries
 
 @contextmanager
 def stdout_suppressed() -> Iterator[IO[str]]:
@@ -201,6 +216,7 @@ def get_test_image_file(filename: str) -> IO[Any]:
 
 def avatar_disk_path(user_profile: UserProfile, medium: bool=False, original: bool=False) -> str:
     avatar_url_path = avatar_url(user_profile, medium)
+    assert avatar_url_path is not None
     avatar_disk_path = os.path.join(settings.LOCAL_UPLOADS_DIR, "avatars",
                                     avatar_url_path.split("/")[-2],
                                     avatar_url_path.split("/")[-1].split("?")[0])
@@ -217,7 +233,10 @@ def find_key_by_email(address: str) -> Optional[str]:
     key_regex = re.compile("accounts/do_confirm/([a-z0-9]{24})>")
     for message in reversed(outbox):
         if address in message.to:
-            return key_regex.search(message.body).groups()[0]
+            match = key_regex.search(message.body)
+            assert match is not None
+            [key] = match.groups()
+            return key
     return None  # nocoverage -- in theory a test might want this case, but none do
 
 def message_stream_count(user_profile: UserProfile) -> int:
@@ -250,27 +269,27 @@ def get_user_messages(user_profile: UserProfile) -> List[Message]:
         order_by('message')
     return [um.message for um in query]
 
-class DummyHandler:
+class DummyHandler(AsyncDjangoHandler):
     def __init__(self) -> None:
-        allocate_handler_id(self)  # type: ignore # this is a testing mock
+        allocate_handler_id(self)
 
 class POSTRequestMock:
     method = "POST"
 
     def __init__(self, post_data: Dict[str, Any], user_profile: Optional[UserProfile]) -> None:
-        self.GET = {}  # type: Dict[str, Any]
+        self.GET: Dict[str, Any] = {}
 
         # Convert any integer parameters passed into strings, even
         # though of course the HTTP API would do so.  Ideally, we'd
         # get rid of this abstraction entirely and just use the HTTP
         # API directly, but while it exists, we need this code.
-        self.POST = {}  # type: Dict[str, str]
+        self.POST: Dict[str, str] = {}
         for key in post_data:
             self.POST[key] = str(post_data[key])
 
         self.user = user_profile
         self._tornado_handler = DummyHandler()
-        self._log_data = {}  # type: Dict[str, Any]
+        self._log_data: Dict[str, Any] = {}
         self.META = {'PATH_INFO': 'test'}
         self.path = ''
 
@@ -278,10 +297,10 @@ class HostRequestMock:
     """A mock request object where get_host() works.  Useful for testing
     routes that use Zulip's subdomains feature"""
 
-    def __init__(self, user_profile: UserProfile=None, host: str=settings.EXTERNAL_HOST) -> None:
+    def __init__(self, user_profile: Optional[UserProfile]=None, host: str=settings.EXTERNAL_HOST) -> None:
         self.host = host
-        self.GET = {}  # type: Dict[str, Any]
-        self.POST = {}  # type: Dict[str, Any]
+        self.GET: Dict[str, Any] = {}
+        self.POST: Dict[str, Any] = {}
         self.META = {'PATH_INFO': 'test'}
         self.path = ''
         self.user = user_profile
@@ -309,9 +328,9 @@ class MockPythonResponse:
 
 
 INSTRUMENTING = os.environ.get('TEST_INSTRUMENT_URL_COVERAGE', '') == 'TRUE'
-INSTRUMENTED_CALLS = []  # type: List[Dict[str, Any]]
+INSTRUMENTED_CALLS: List[Dict[str, Any]] = []
 
-UrlFuncT = Callable[..., HttpResponse]  # TODO: make more specific
+UrlFuncT = TypeVar("UrlFuncT", bound=Callable[..., HttpResponse])  # TODO: make more specific
 
 def append_instrumentation_data(data: Dict[str, Any]) -> None:
     INSTRUMENTED_CALLS.append(data)
@@ -320,7 +339,7 @@ def instrument_url(f: UrlFuncT) -> UrlFuncT:
     if not INSTRUMENTING:  # nocoverage -- option is always enabled; should we remove?
         return f
     else:
-        def wrapper(self: 'ZulipTestCase', url: str, info: Dict[str, Any]={},
+        def wrapper(self: 'ZulipTestCase', url: str, info: object = {},
                     **kwargs: Any) -> HttpResponse:
             start = time.time()
             result = f(self, url, info, **kwargs)
@@ -330,6 +349,16 @@ def instrument_url(f: UrlFuncT) -> UrlFuncT:
                 url, extra_info = url.split('?', 1)
             else:
                 extra_info = ''
+
+            if isinstance(info, POSTRequestMock):
+                info = "<POSTRequestMock>"
+            elif isinstance(info, bytes):
+                info = "<bytes>"
+            elif isinstance(info, dict):
+                info = {
+                    k: "<file object>" if hasattr(v, "read") and callable(getattr(v, "read")) else v
+                    for k, v in info.items()
+                }
 
             append_instrumentation_data(dict(
                 url=url,
@@ -341,7 +370,7 @@ def instrument_url(f: UrlFuncT) -> UrlFuncT:
                 test_name=test_name,
                 kwargs=kwargs))
             return result
-        return wrapper
+        return cast(UrlFuncT, wrapper)  # https://github.com/python/mypy/issues/1927
 
 def write_instrumentation_reports(full_suite: bool, include_webhooks: bool) -> None:
     if INSTRUMENTING:
@@ -350,7 +379,7 @@ def write_instrumentation_reports(full_suite: bool, include_webhooks: bool) -> N
         from zproject.urls import urlpatterns, v1_api_and_json_patterns
 
         # Find our untested urls.
-        pattern_cnt = collections.defaultdict(int)  # type: Dict[str, int]
+        pattern_cnt: Dict[str, int] = collections.defaultdict(int)
 
         def re_strip(r: Any) -> str:
             return str(r).lstrip('^').rstrip('$')
@@ -399,9 +428,9 @@ def write_instrumentation_reports(full_suite: bool, include_webhooks: bool) -> N
         find_patterns(v1_api_and_json_patterns, ['api/v1/', 'json/'])
 
         assert len(pattern_cnt) > 100
-        untested_patterns = {p for p in pattern_cnt if pattern_cnt[p] == 0}
+        untested_patterns = {p.replace("\\", "") for p in pattern_cnt if pattern_cnt[p] == 0}
 
-        exempt_patterns = set([
+        exempt_patterns = {
             # We exempt some patterns that are called via Tornado.
             'api/v1/events',
             'api/v1/events/internal',
@@ -409,53 +438,44 @@ def write_instrumentation_reports(full_suite: bool, include_webhooks: bool) -> N
             # We also exempt some development environment debugging
             # static content URLs, since the content they point to may
             # or may not exist.
-            'coverage/(?P<path>.*)',
-            'node-coverage/(?P<path>.*)',
-            'docs/(?P<path>.*)',
-            'casper/(?P<path>.*)',
-            'static/(?P<path>.*)',
-        ] + [webhook.url for webhook in WEBHOOK_INTEGRATIONS if not include_webhooks])
+            'coverage/(?P<path>.+)',
+            'confirmation_key/',
+            'node-coverage/(?P<path>.+)',
+            'docs/(?P<path>.+)',
+            'casper/(?P<path>.+)',
+            'static/(?P<path>.+)',
+            *(webhook.url for webhook in WEBHOOK_INTEGRATIONS if not include_webhooks),
+        }
 
         untested_patterns -= exempt_patterns
 
         var_dir = 'var'  # TODO make sure path is robust here
         fn = os.path.join(var_dir, 'url_coverage.txt')
-        with open(fn, 'w') as f:
+        with open(fn, 'wb') as f:
             for call in calls:
-                try:
-                    line = ujson.dumps(call)
-                    f.write(line + '\n')
-                except OverflowError:  # nocoverage -- test suite error handling
-                    print('''
-                        A JSON overflow error was encountered while
-                        producing the URL coverage report.  Sometimes
-                        this indicates that a test is passing objects
-                        into methods like client_post(), which is
-                        unnecessary and leads to false positives.
-                        ''')
-                    print(call)
+                f.write(orjson.dumps(call, option=orjson.OPT_APPEND_NEWLINE))
 
         if full_suite:
-            print('INFO: URL coverage report is in %s' % (fn,))
+            print(f'INFO: URL coverage report is in {fn}')
             print('INFO: Try running: ./tools/create-test-api-docs')
 
         if full_suite and len(untested_patterns):  # nocoverage -- test suite error handling
             print("\nERROR: Some URLs are untested!  Here's the list of untested URLs:")
             for untested_pattern in sorted(untested_patterns):
-                print("   %s" % (untested_pattern,))
+                print(f"   {untested_pattern}")
             sys.exit(1)
 
-def load_subdomain_token(response: HttpResponse) -> Dict[str, Any]:
+def load_subdomain_token(response: HttpResponse) -> ExternalAuthDataDict:
     assert isinstance(response, HttpResponseRedirect)
     token = response.url.rsplit('/', 1)[1]
-    data = get_login_data(token, should_delete=False)
+    data = ExternalAuthResult(login_token=token, delete_stored_data=False).data_dict
     assert data is not None
     return data
 
 FuncT = TypeVar('FuncT', bound=Callable[..., None])
 
 def use_s3_backend(method: FuncT) -> FuncT:
-    @mock_s3_deprecated
+    @mock_s3
     @override_settings(LOCAL_UPLOADS_DIR=None)
     def new_method(*args: Any, **kwargs: Any) -> Any:
         zerver.lib.upload.upload_backend = S3UploadBackend()
@@ -465,9 +485,10 @@ def use_s3_backend(method: FuncT) -> FuncT:
             zerver.lib.upload.upload_backend = LocalUploadBackend()
     return new_method
 
-def create_s3_buckets(*bucket_names: Tuple[str]) -> List[Bucket]:
-    conn = S3Connection(settings.S3_KEY, settings.S3_SECRET_KEY)
-    buckets = [conn.create_bucket(name) for name in bucket_names]
+def create_s3_buckets(*bucket_names: Tuple[str]) -> List[ServiceResource]:
+    session = boto3.Session(settings.S3_KEY, settings.S3_SECRET_KEY)
+    s3 = session.resource('s3')
+    buckets = [s3.create_bucket(Bucket=name) for name in bucket_names]
     return buckets
 
 def use_db_models(method: Callable[..., None]) -> Callable[..., None]:  # nocoverage
@@ -553,7 +574,7 @@ def use_db_models(method: Callable[..., None]) -> Callable[..., None]:  # nocove
             UserHotspot=UserHotspot,
             UserMessage=UserMessage,
             UserPresence=UserPresence,
-            UserProfile=UserProfile
+            UserProfile=UserProfile,
         )
         zerver_test_helpers_patch = mock.patch.multiple(
             'zerver.lib.test_helpers',
@@ -586,3 +607,38 @@ def create_dummy_file(filename: str) -> str:
     with open(filepath, 'w') as f:
         f.write('zulip!')
     return filepath
+
+def zulip_reaction_info() -> Dict[str, str]:
+    return dict(
+        emoji_name='zulip',
+        emoji_code='zulip',
+        reaction_type='zulip_extra_emoji',
+    )
+
+@contextmanager
+def mock_queue_publish(
+        method_to_patch: str,
+        **kwargs: object,
+) -> Iterator[mock.MagicMock]:
+    inner = mock.MagicMock(**kwargs)
+
+    def verify_serialize(
+        queue_name: str,
+        event: Dict[str, object],
+        processor: Optional[Callable[[object], None]] = None,
+    ) -> None:
+        marshalled_event = orjson.loads(orjson.dumps(event))
+        assert marshalled_event == event
+        inner(queue_name, event, processor)
+
+    with mock.patch(method_to_patch, side_effect=verify_serialize):
+        yield inner
+
+def patch_queue_publish(method_to_patch: str) -> Callable[[Callable[..., None]], Callable[..., None]]:
+    def inner(func: Callable[..., None]) -> Callable[..., None]:
+        @wraps(func)
+        def _wrapped(*args: object, **kwargs: object) -> None:
+            with mock_queue_publish(method_to_patch) as m:
+                func(*args, m, **kwargs)
+        return _wrapped
+    return inner

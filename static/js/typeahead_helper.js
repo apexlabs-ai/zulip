@@ -1,21 +1,28 @@
-const util = require("./util");
+"use strict";
+
+const Handlebars = require("handlebars/runtime");
+const _ = require("lodash");
+
 const pygments_data = require("../generated/pygments_data.json");
+const emoji = require("../shared/js/emoji");
 const typeahead = require("../shared/js/typeahead");
-const render_typeahead_list_item = require('../templates/typeahead_list_item.hbs');
+const render_typeahead_list_item = require("../templates/typeahead_list_item.hbs");
+
+const people = require("./people");
+const pm_conversations = require("./pm_conversations");
 const settings_data = require("./settings_data");
+const util = require("./util");
 
 // Returns an array of private message recipients, removing empty elements.
 // For example, "a,,b, " => ["a", "b"]
 exports.get_cleaned_pm_recipients = function (query_string) {
     let recipients = util.extract_pm_recipients(query_string);
-    recipients = recipients.filter(elem => elem.match(/\S/));
+    recipients = recipients.filter((elem) => elem.match(/\S/));
     return recipients;
 };
 
 exports.build_highlight_regex = function (query) {
-    // the regex below is based on bootstrap code
-    query = query.replace(/[\-\[\]{}()*+?.,\\\^$|#\s]/g, '\\$&');
-    const regex = new RegExp('(' + query + ')', 'ig');
+    const regex = new RegExp("(" + _.escapeRegExp(query) + ")", "ig");
     return regex;
 };
 
@@ -47,7 +54,7 @@ exports.make_query_highlighter = function (query) {
 
     return function (phrase) {
         let result = "";
-        const parts = phrase.split(' ');
+        const parts = phrase.split(" ");
         for (i = 0; i < parts.length; i += 1) {
             if (i > 0) {
                 result += " ";
@@ -64,7 +71,7 @@ exports.render_typeahead_item = function (args) {
     return render_typeahead_list_item(args);
 };
 
-const rendered = { persons: new Map(), streams: new Map(), user_groups: new Map() };
+const rendered = {persons: new Map(), streams: new Map(), user_groups: new Map()};
 
 exports.render_person = function (person) {
     if (person.special_item_text) {
@@ -124,7 +131,7 @@ exports.clear_rendered_stream = function (stream_id) {
 
 exports.render_stream = function (stream) {
     let desc = stream.description;
-    const short_desc = desc.substring(0, 35);
+    const short_desc = desc.slice(0, 35);
 
     if (desc !== short_desc) {
         desc = short_desc + "...";
@@ -191,8 +198,8 @@ exports.compare_people_for_relevance = function (
     person_a,
     person_b,
     tertiary_compare,
-    current_stream) {
-
+    current_stream_id,
+) {
     // give preference to "all", "everyone" or "stream"
     // We use is_broadcast for a quick check.  It will
     // true for all/everyone/stream and undefined (falsy)
@@ -209,9 +216,9 @@ exports.compare_people_for_relevance = function (
     // Now handle actual people users.
 
     // give preference to subscribed users first
-    if (current_stream !== undefined) {
-        const a_is_sub = stream_data.is_user_subscribed(current_stream, person_a.user_id);
-        const b_is_sub = stream_data.is_user_subscribed(current_stream, person_b.user_id);
+    if (current_stream_id !== undefined) {
+        const a_is_sub = stream_data.is_user_subscribed(current_stream_id, person_a.user_id);
+        const b_is_sub = stream_data.is_user_subscribed(current_stream_id, person_b.user_id);
 
         if (a_is_sub && !b_is_sub) {
             return -1;
@@ -240,38 +247,28 @@ exports.sort_people_for_relevance = function (objs, current_stream_name, current
         current_stream = stream_data.get_sub(current_stream_name);
     }
     if (!current_stream) {
-        objs.sort(function (person_a, person_b) {
-            return exports.compare_people_for_relevance(
-                person_a,
-                person_b,
-                exports.compare_by_pms
-            );
-        });
+        objs.sort((person_a, person_b) =>
+            exports.compare_people_for_relevance(person_a, person_b, exports.compare_by_pms),
+        );
     } else {
         const stream_id = current_stream.stream_id;
 
-        objs.sort(function (person_a, person_b) {
-            return exports.compare_people_for_relevance(
+        objs.sort((person_a, person_b) =>
+            exports.compare_people_for_relevance(
                 person_a,
                 person_b,
-                function (user_a, user_b) {
-                    return recent_senders.compare_by_recency(
-                        user_a,
-                        user_b,
-                        stream_id,
-                        current_topic
-                    );
-                },
-                current_stream.name
-            );
-        });
+                (user_a, user_b) =>
+                    recent_senders.compare_by_recency(user_a, user_b, stream_id, current_topic),
+                current_stream.stream_id,
+            ),
+        );
     }
 
     return objs;
 };
 
 exports.compare_by_popularity = function (lang_a, lang_b) {
-    const diff = pygments_data.langs[lang_b] - pygments_data.langs[lang_a];
+    const diff = pygments_data.langs[lang_b].priority - pygments_data.langs[lang_a].priority;
     if (diff !== 0) {
         return diff;
     }
@@ -302,7 +299,7 @@ exports.sort_recipients = function (
     current_stream,
     current_topic,
     groups,
-    max_num_items
+    max_num_items,
 ) {
     if (!groups) {
         groups = [];
@@ -313,24 +310,14 @@ exports.sort_recipients = function (
     }
 
     function sort_relevance(items) {
-        return exports.sort_people_for_relevance(
-            items, current_stream, current_topic);
+        return exports.sort_people_for_relevance(items, current_stream, current_topic);
     }
 
-    const users_name_results = typeahead.triage(
-        query,
-        users,
-        (p) => p.full_name);
+    const users_name_results = typeahead.triage(query, users, (p) => p.full_name);
 
-    const email_results = typeahead.triage(
-        query,
-        users_name_results.rest,
-        (p) => p.email);
+    const email_results = typeahead.triage(query, users_name_results.rest, (p) => p.email);
 
-    const groups_results = typeahead.triage(
-        query,
-        groups,
-        (g) => g.name);
+    const groups_results = typeahead.triage(query, groups, (g) => g.name);
 
     const best_users = () => sort_relevance(users_name_results.matches);
     const best_groups = () => groups_results.matches;
@@ -338,13 +325,7 @@ exports.sort_recipients = function (
     const worst_users = () => sort_relevance(email_results.rest);
     const worst_groups = () => groups_results.rest;
 
-    const getters = [
-        best_users,
-        best_groups,
-        ok_users,
-        worst_users,
-        worst_groups,
-    ];
+    const getters = [best_users, best_groups, ok_users, worst_users, worst_groups];
 
     /*
         The following optimization is important for large realms.
@@ -371,12 +352,13 @@ function slash_command_comparator(slash_command_a, slash_command_b) {
     } else if (slash_command_a.name > slash_command_b.name) {
         return 1;
     }
+    /* istanbul ignore next */
+    return 0;
 }
 exports.sort_slash_commands = function (matches, query) {
     // We will likely want to in the future make this sort the
     // just-`/` commands by something approximating usefulness.
-    const results = typeahead.triage(
-        query, matches, (x) => x.name);
+    const results = typeahead.triage(query, matches, (x) => x.name);
 
     results.matches = results.matches.sort(slash_command_comparator);
     results.rest = results.rest.sort(slash_command_comparator);
@@ -415,11 +397,9 @@ exports.compare_by_activity = function (stream_a, stream_b) {
 };
 
 exports.sort_streams = function (matches, query) {
-    const name_results = typeahead.triage(
-        query, matches, (x) => x.name);
+    const name_results = typeahead.triage(query, matches, (x) => x.name);
 
-    const desc_results = typeahead.triage(
-        query, name_results.rest, (x) => x.description);
+    const desc_results = typeahead.triage(query, name_results.rest, (x) => x.description);
 
     // Streams that start with the query.
     name_results.matches = name_results.matches.sort(exports.compare_by_activity);

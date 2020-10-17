@@ -1,22 +1,41 @@
 import itertools
-import ujson
-import random
-from typing import List, Dict, Any
 import os
+import random
+from typing import Any, Dict, List
+
+import orjson
 
 from scripts.lib.zulip_tools import get_or_create_dev_uuid_var_path
 
+
 def load_config() -> Dict[str, Any]:
-    with open("zerver/tests/fixtures/config.generate_data.json") as infile:
-        config = ujson.load(infile)
+    with open("zerver/tests/fixtures/config.generate_data.json", "rb") as infile:
+        config = orjson.loads(infile.read())
 
     return config
 
-def get_stream_title(gens: Dict[str, Any]) -> str:
+def generate_topics(num_topics: int) -> List[str]:
+    config = load_config()["gen_fodder"]
 
-    return next(gens["adjectives"]) + " " + next(gens["nouns"]) + " " + \
-        next(gens["connectors"]) + " " + next(gens["verbs"]) + " " + \
-        next(gens["adverbs"])
+    topics = []
+    # Make single word topics account for 30% of total topics.
+    # Single word topics are most common, thus
+    # it is important we test on it.
+    num_single_word_topics = num_topics // 3
+    for _ in itertools.repeat(None, num_single_word_topics):
+        topics.append(random.choice(config["nouns"]))
+
+    sentence = ["adjectives", "nouns", "connectors", "verbs", "adverbs"]
+    for pos in sentence:
+        # Add an empty string so that we can generate variable length topics.
+        config[pos].append("")
+
+    for _ in itertools.repeat(None, num_topics - num_single_word_topics):
+        generated_topic = [random.choice(config[pos]) for pos in sentence]
+        topic = " ".join(filter(None, generated_topic))
+        topics.append(topic)
+
+    return topics
 
 def load_generators(config: Dict[str, Any]) -> Dict[str, Any]:
 
@@ -45,7 +64,7 @@ def parse_file(config: Dict[str, Any], gens: Dict[str, Any], corpus_file: str) -
     # First, load the entire file into a dictionary,
     # then apply our custom filters to it as needed.
 
-    paragraphs = []  # type: List[str]
+    paragraphs: List[str] = []
 
     with open(corpus_file) as infile:
         # OUR DATA: we need to separate the person talking and what they say
@@ -111,7 +130,7 @@ def add_flair(paragraphs: List[str], gens: Dict[str, Any]) -> List[str]:
 def add_md(mode: str, text: str) -> str:
 
     # mode means: bold, italic, etc.
-    # to add a list at the end of a paragraph, * iterm one\n * item two
+    # to add a list at the end of a paragraph, * item one\n * item two
 
     # find out how long the line is, then insert the mode before the end
 
@@ -163,8 +182,8 @@ def remove_line_breaks(fh: Any) -> List[str]:
 
 def write_file(paragraphs: List[str], filename: str) -> None:
 
-    with open(filename, "w") as outfile:
-        outfile.write(ujson.dumps(paragraphs))
+    with open(filename, "wb") as outfile:
+        outfile.write(orjson.dumps(paragraphs))
 
 def create_test_data() -> None:
 

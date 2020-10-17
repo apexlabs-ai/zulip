@@ -3,7 +3,7 @@ from typing import Any, Dict
 
 from django.http import HttpRequest, HttpResponse
 
-from zerver.decorator import api_key_only_webhook_view
+from zerver.decorator import webhook_view
 from zerver.lib.request import REQ, has_request_variables
 from zerver.lib.response import json_success
 from zerver.lib.webhooks.common import check_send_webhook_message
@@ -18,7 +18,7 @@ CRASHLYTICS_SETUP_MESSAGE_TEMPLATE = "Webhook has been successfully configured."
 VERIFICATION_EVENT = 'verification'
 
 
-@api_key_only_webhook_view('Crashlytics')
+@webhook_view('Crashlytics')
 @has_request_variables
 def api_crashlytics_webhook(request: HttpRequest, user_profile: UserProfile,
                             payload: Dict[str, Any]=REQ(argument_type='body')) -> HttpResponse:
@@ -30,11 +30,11 @@ def api_crashlytics_webhook(request: HttpRequest, user_profile: UserProfile,
         issue_body = payload['payload']
         subject = CRASHLYTICS_TOPIC_TEMPLATE.format(
             display_id=issue_body['display_id'],
-            title=issue_body['title']
+            title=issue_body['title'],
         )
         body = CRASHLYTICS_MESSAGE_TEMPLATE.format(
             impacted_devices_count=issue_body['impacted_devices_count'],
-            url=issue_body['url']
+            url=issue_body['url'],
         )
 
     check_send_webhook_message(request, user_profile, subject, body)

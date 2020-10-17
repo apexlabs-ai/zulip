@@ -2,6 +2,7 @@
 
 # check for the venv
 from lib import sanity_check
+
 sanity_check.check_venv(__file__)
 
 import argparse
@@ -12,8 +13,7 @@ import subprocess
 import sys
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from scripts.lib.zulip_tools import WARNING, FAIL, ENDC
-
+from scripts.lib.zulip_tools import ENDC, FAIL, WARNING
 from tools.lib.capitalization import check_capitalization
 
 DJANGO_PO_REGEX = re.compile('msgid "(.*?)"')
@@ -21,11 +21,11 @@ DJANGO_PO_REGEX = re.compile('msgid "(.*?)"')
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--show-ignored',
-                        action='store_true', dest='show_ignored', default=False,
+                        action='store_true',
                         help='Show strings that passed the check because they '
                              'contained ignored phrases.')
     parser.add_argument('--no-generate',
-                        action='store_true', dest='no_generate', default=False,
+                        action='store_true',
                         help="Don't run makemessages command.")
     args = parser.parse_args()
 

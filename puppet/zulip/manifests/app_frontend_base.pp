@@ -5,22 +5,18 @@ class zulip::app_frontend_base {
   include zulip::nginx
   include zulip::sasl_modules
   include zulip::supervisor
+  include zulip::tornado_sharding
 
   if $::osfamily == 'debian' {
-    $web_packages = [
-      # This is not necessary on CentOS because $postgresql package already includes the client
-      # Needed to access our database
-      "postgresql-client-${zulip::base::postgres_version}",
-      # Needed for Slack import
-      'unzip',
-    ]
-  } else {
-      $web_packages = [
-        # Needed for Slack import
-        'unzip',
-      ]
+    # Upgrade and other tooling wants to be able to get a database
+    # shell.  This is not necessary on CentOS because the postgresql
+    # package already includes the client.  This may get us a more
+    # recent client than the database server is configured to be,
+    # ($zulip::base::postgres_version), but they're compatible.
+    zulip::safepackage { 'postgresql-client': ensure => 'installed' }
   }
-  zulip::safepackage { $web_packages: ensure => 'installed' }
+  # For Slack import
+  zulip::safepackage { 'unzip': ensure => 'installed' }
 
   file { '/etc/nginx/zulip-include/app':
     require => Package[$zulip::common::nginx],
@@ -28,14 +24,6 @@ class zulip::app_frontend_base {
     group   => 'root',
     mode    => '0644',
     source  => 'puppet:///modules/zulip/nginx/zulip-include-frontend/app',
-    notify  => Service['nginx'],
-  }
-  file { '/etc/nginx/zulip-include/upstreams':
-    require => Package[$zulip::common::nginx],
-    owner   => 'root',
-    group   => 'root',
-    mode    => '0644',
-    source  => 'puppet:///modules/zulip/nginx/zulip-include-frontend/upstreams',
     notify  => Service['nginx'],
   }
   file { '/etc/nginx/zulip-include/uploads.types':
@@ -65,15 +53,13 @@ class zulip::app_frontend_base {
     }
   }
 
-  # The number of Tornado processes to run on the server;
-  # historically, this has always been 1, but we now have experimental
-  # support for Tornado sharding.
-  $tornado_processes = zulipconf('application_server', 'tornado_processes', 1)
-  if $tornado_processes > 1 {
-    $tornado_ports = range(9800, 9800 + $tornado_processes)
-    $tornado_multiprocess = true
-  } else {
-    $tornado_multiprocess = false
+  file { '/etc/nginx/zulip-include/upstreams':
+    require => Package[$zulip::common::nginx],
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0644',
+    source  => 'puppet:///modules/zulip/nginx/zulip-include-frontend/upstreams',
+    notify  => Service['nginx'],
   }
 
   # This determines whether we run queue processors multithreaded or
@@ -86,9 +72,10 @@ class zulip::app_frontend_base {
   } else {
     $uwsgi_default_processes = 4
   }
+  $tornado_ports = $zulip::tornado_sharding::tornado_ports
   file { "${zulip::common::supervisor_conf_dir}/zulip.conf":
     ensure  => file,
-    require => Package[supervisor],
+    require => [Package[supervisor], Exec['stage_updated_sharding']],
     owner   => 'root',
     group   => 'root',
     mode    => '0644',
@@ -99,6 +86,7 @@ class zulip::app_frontend_base {
   $uwsgi_listen_backlog_limit = zulipconf('application_server', 'uwsgi_listen_backlog_limit', 128)
   $uwsgi_buffer_size = zulipconf('application_server', 'uwsgi_buffer_size', 8192)
   $uwsgi_processes = zulipconf('application_server', 'uwsgi_processes', $uwsgi_default_processes)
+  $somaxconn = 2 * Integer($uwsgi_listen_backlog_limit)
   file { '/etc/zulip/uwsgi.ini':
     ensure  => file,
     require => Package[supervisor],
@@ -107,6 +95,21 @@ class zulip::app_frontend_base {
     mode    => '0644',
     content => template('zulip/uwsgi.ini.template.erb'),
     notify  => Service[$zulip::common::supervisor_service],
+  }
+  file { '/etc/sysctl.d/40-uwsgi.conf':
+    ensure  => file,
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0644',
+    content => template('zulip/sysctl.d/40-uwsgi.conf.erb'),
+  }
+  exec { 'sysctl_p_uwsgi':
+    command     => '/sbin/sysctl -p /etc/sysctl.d/40-uwsgi.conf',
+    subscribe   => File['/etc/sysctl.d/40-uwsgi.conf'],
+    refreshonly => true,
+    # We have to protect against running in Docker and other
+    # containerization which prevents adjusting these.
+    onlyif      => 'touch /proc/sys/net/core/somaxconn',
   }
 
   file { '/home/zulip/tornado':
@@ -142,9 +145,6 @@ class zulip::app_frontend_base {
     group  => 'zulip',
     mode   => '0755',
   }
-  file { '/etc/cron.d/email-mirror':
-    ensure => absent,
-  }
   file { "${zulip::common::nagios_plugins_dir}/zulip_app_frontend":
     require => Package[$zulip::common::nagios_plugins],
     recurse => true,
@@ -153,16 +153,5 @@ class zulip::app_frontend_base {
     group   => 'root',
     mode    => '0755',
     source  => 'puppet:///modules/zulip/nagios_plugins/zulip_app_frontend',
-  }
-
-  if $::osfamily == 'debian' {
-    # The pylibmc wheel looks for SASL plugins in the wrong place.
-    file { '/usr/lib64':
-      ensure => directory,
-    }
-    file { '/usr/lib64/sasl2':
-      ensure => link,
-      target => "/usr/lib/${::rubyplatform}/sasl2",
-    }
   }
 }

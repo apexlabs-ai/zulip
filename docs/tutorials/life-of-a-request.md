@@ -1,4 +1,4 @@
-# Life of a Request
+# Life of a request
 
 It can sometimes be confusing to figure out how to write a new feature,
 or debug an existing one. Let us try to follow a request through the
@@ -37,7 +37,7 @@ location /static/ {
 }
 ```
 
-## Nginx routes other requests [between django and tornado][tornado-django]
+## Nginx routes other requests [between Django and Tornado][tornado-django]
 
 [tornado-django]: ../overview/architecture-overview.html?highlight=tornado#django-and-tornado
 
@@ -78,9 +78,9 @@ we can see something called `i18n_urls`. These urls show up in the
 address bar of the browser, and serve HTML.
 
 For example, the `/features` page (preview
-[here](https://zulipchat.com/features/)) gets translated in Chinese at
+[here](https://zulip.com/features/)) gets translated in Chinese at
 `zh-hans/features/` (preview
-[here](https://zulipchat.com/zh-hans/features/)).
+[here](https://zulip.com/zh-hans/features/)).
 
 Note the `zh-hans` prefix--that url pattern gets added by `i18n_patterns`.
 
@@ -140,9 +140,9 @@ yields a response with this HTTP header:
 
 We can see this reflected in [zproject/urls.py](https://github.com/zulip/zulip/blob/master/zproject/urls.py):
 
-    url(r'^users$', 'zerver.lib.rest.rest_dispatch',
-        {'GET': 'zerver.views.users.get_members_backend',
-         'PUT': 'zerver.views.users.create_user_backend'}),
+    rest_path('users',
+              GET=get_members_backend,
+              PUT=create_user_backend),
 
 In this way, the API is partially self-documenting.
 
@@ -176,11 +176,11 @@ the request, and then figure out which view to show from that.
 In our example,
 
 ```
-{'GET': 'zerver.views.users.get_members_backend',
- 'PUT': 'zerver.views.users.create_user_backend'}
+GET=get_members_backend,
+PUT=create_user_backend
 ```
 
-is supplied as an argument to `rest_dispatch`, along with the
+are supplied as arguments to `rest_path`, along with the
 [HTTPRequest](https://docs.djangoproject.com/en/1.8/ref/request-response/).
 The request has the HTTP verb `PUT`, which `rest_dispatch` can use to
 find the correct view to show:

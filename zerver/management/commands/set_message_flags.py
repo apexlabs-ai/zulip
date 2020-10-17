@@ -16,29 +16,20 @@ class Command(ZulipBaseCommand):
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument('-l', '--for-real',
-                            dest='for_real',
                             action='store_true',
-                            default=False,
                             help="Actually change message flags. Default is a dry run.")
 
         parser.add_argument('-f', '--flag',
-                            dest='flag',
-                            type=str,
                             help="The flag to add of remove")
 
         parser.add_argument('-o', '--op',
-                            dest='op',
-                            type=str,
                             help="The operation to do: 'add' or 'remove'")
 
         parser.add_argument('-u', '--until',
                             dest='all_until',
-                            type=str,
                             help="Mark all messages <= specific usermessage id")
 
         parser.add_argument('-m', '--email',
-                            dest='email',
-                            type=str,
                             help="Email to set messages for")
         self.add_realm_args(parser)
 
@@ -74,7 +65,7 @@ class Command(ZulipBaseCommand):
                 msgs.update(flags=models.F('flags').bitand(~flag))
 
         if not options["for_real"]:
-            logging.info("Updating %s by %s %s" % (mids, op, flag))
+            logging.info("Updating %s by %s %s", mids, op, flag)
             logging.info("Dry run completed. Run with --for-real to change message flags.")
             raise CommandError
 

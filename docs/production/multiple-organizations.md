@@ -46,11 +46,11 @@ things:
   [the notes on `SOCIAL_AUTH_SUBDOMAIN` below](#authentication).
 
 For servers hosting a large number of organizations, like
-[zulipchat.com](https://zulipchat.com), one can set
-`ROOT_DOMAIN_LANDING_PAGE = True` in `/etc/zulip/settings.py` so that
-the homepage for the server is a copy of the Zulip homepage.
+[zulip.com](https://zulip.com), one can set `ROOT_DOMAIN_LANDING_PAGE
+= True` in `/etc/zulip/settings.py` so that the homepage for the
+server is a copy of the Zulip homepage.
 
-### SSL Certificates
+### SSL certificates
 
 You'll need to install an SSL certificate valid for all the
 (sub)domains you're using your Zulip server with.  You can get an SSL
@@ -86,7 +86,7 @@ into the database.
 ### The root domain
 
 Most Zulip servers host a single Zulip organization on the root domain
-(i.e. `zulip.example.com`).  The way this is implemented internally
+(e.g. `zulip.example.com`).  The way this is implemented internally
 involves the organization having the empty string (`''`) as its
 "subdomain".
 
@@ -125,7 +125,7 @@ like "Notification Bot", "Welcome Bot", etc. exist.  In the future,
 we're considering moving these bots to exist in every realm, so that
 we wouldn't need the system realm anymore.
 
-### Migrating / Troubleshooting
+### Migrating / troubleshooting
 
 If you're migrating from a configuration using the root domain to one
 with realms hosted on subdomains, be sure to clear cookies in any

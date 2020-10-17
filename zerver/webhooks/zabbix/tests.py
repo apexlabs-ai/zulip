@@ -15,7 +15,7 @@ class ZabbixHookTests(WebhookTestCase):
         """
         expected_topic = "www.example.com"
         expected_message = "PROBLEM (Average) alert on [www.example.com](https://zabbix.example.com/tr_events.php?triggerid=14032&eventid=10528):\n* Zabbix agent on www.example.com is unreachable for 5 minutes\n* Agent ping is Up (1)"
-        self.send_and_test_stream_message('zabbix_alert', expected_topic, expected_message)
+        self.check_webhook("zabbix_alert", expected_topic, expected_message)
 
     def test_zabbix_invalid_payload_with_missing_data(self) -> None:
         """
@@ -28,12 +28,9 @@ class ZabbixHookTests(WebhookTestCase):
 
         expected_message = MISCONFIGURED_PAYLOAD_ERROR_MESSAGE.format(
             bot_name=self.test_user.full_name,
-            support_email=FromAddress.SUPPORT
+            support_email=FromAddress.SUPPORT,
         ).strip()
 
         msg = self.get_last_message()
         self.assertEqual(msg.content, expected_message)
         self.assertEqual(msg.recipient.type, Recipient.PERSONAL)
-
-    def get_body(self, fixture_name: str) -> str:
-        return self.webhook_fixture_data("zabbix", fixture_name, file_type="json")

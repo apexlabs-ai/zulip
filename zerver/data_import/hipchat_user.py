@@ -2,12 +2,9 @@ from typing import Any, Dict, List
 
 from django.utils.timezone import now as timezone_now
 
-from zerver.data_import.import_util import (
-    build_user_profile,
-)
-from zerver.models import (
-    UserProfile,
-)
+from zerver.data_import.import_util import build_user_profile
+from zerver.models import UserProfile
+
 
 class UserHandler:
     '''
@@ -21,9 +18,10 @@ class UserHandler:
     We also sometimes need to build mirror
     users on the fly.
     '''
+
     def __init__(self) -> None:
-        self.id_to_user_map = dict()  # type: Dict[int, Dict[str, Any]]
-        self.name_to_mirror_user_map = dict()  # type: Dict[str, Dict[str, Any]]
+        self.id_to_user_map: Dict[int, Dict[str, Any]] = {}
+        self.name_to_mirror_user_map: Dict[str, Dict[str, Any]] = {}
         self.mirror_user_id = 1
 
     def add_user(self, user: Dict[str, Any]) -> None:
@@ -44,7 +42,7 @@ class UserHandler:
         user_id = self._new_mirror_user_id()
         short_name = name
         full_name = name
-        email = 'mirror-{user_id}@example.com'.format(user_id=user_id)
+        email = f'mirror-{user_id}@example.com'
         delivery_email = email
         avatar_source = 'G'
         date_joined = int(timezone_now().timestamp())

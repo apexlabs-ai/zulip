@@ -39,9 +39,9 @@ form `/help/foo`; with special cases for `/help/` going to `index.md` and
 are usually linked from `static/images/help/`.
 
 This means that you can contribute to the Zulip user documentation by just
-adding to or editing the collection of markdown files under
+adding to or editing the collection of Markdown files under
 `templates/zerver/help`.  If you have the Zulip development environment
-setup, you simply need to reload your browser on
+set up, you simply need to reload your browser on
 `http://localhost:9991/help/foo` to see the latest version of `foo.md`
 rendered.
 
@@ -100,7 +100,7 @@ your documentation to help improve its readability:
 
 * Since raw HTML is supported in Markdown, you can include arbitrary
 HTML/CSS in your documentation as needed.
-* Code blocks allow you to highlight syntax, similar to Zulip's own markdown.
+* Code blocks allow you to highlight syntax, similar to Zulip's own Markdown.
 * Anchor tags can be used to link to headers in other documents.
 * [Images](#images) of Zulip UI can be added to documentation.
 * Inline [icons](#icons) used to refer to features in the Zulip UI.
@@ -108,7 +108,7 @@ HTML/CSS in your documentation as needed.
 documentation.
 * You can create special highlight warning blocks using
 [tips and warnings](#tips-and-warnings).
-* You can create tabs using [markdown tab switcher](#tab-switcher).
+* You can create tabs using [Markdown tab switcher](#tab-switcher).
 
 ### Images
 
@@ -147,8 +147,8 @@ class="fa fa-cog"></i>) icon`
 `down chevron (<i class="fa fa-chevron-down"></i>) icon`
 * eye (<i class="fa fa-eye"></i>) icon — `eye (<i
 class="fa fa-eye"></i>) icon`
-* file (<i class="fa fa-file-text-o"></i>) icon — `file (<i
-class="fa fa-file-text-o"></i>) icon`
+* file (<i class="fa fa-file-code-o"></i>) icon — `file (<i
+class="fa fa-file-code-o"></i>) icon`
 * filled star (<i class="fa fa-star"></i>) icon —
 `filled star (<i class="fa fa-star"></i>) icon`
 * formatting (<i class="fa fa-font"></i>) icon —
@@ -230,11 +230,11 @@ All tips/warnings should appear inside tip/warning blocks. There
 should be only one tip/warning inside each block, and they usually
 should be formatted as a continuation of a numbered step.
 
-###  Tab Switcher
+###  Tab switcher
 
-Our markdown processor supports easily creating a tab switcher widget
+Our Markdown processor supports easily creating a tab switcher widget
 design to easily show the instructions for different
-[platforms](https://zulipchat.com/help/logging-out) in user docs,
+[platforms](https://zulip.com/help/logging-out) in user docs,
 languages in API docs, etc.  To create a tab switcher, write:
 
     {start_tabs}
@@ -248,11 +248,11 @@ languages in API docs, etc.  To create a tab switcher, write:
 
 The tab identifiers (e.g. `desktop-web` above) and their mappings to
 the tabs' labels are declared in
-[zerver/lib/bugdown/tabbed_sections.py][tabbed-sections-code].
+[zerver/lib/markdown/tabbed_sections.py][tabbed-sections-code].
 
-[tabbed-sections-code]: https://github.com/zulip/zulip/blob/master/zerver/lib/bugdown/tabbed_sections.py#L37
+[tabbed-sections-code]: https://github.com/zulip/zulip/blob/master/zerver/lib/markdown/tabbed_sections.py#L37
 
 This widget can also be used just to create a nice box around a set of
 instructions
-([example](https://zulipchat.com/help/deactivate-your-account)) by
+([example](https://zulip.com/help/deactivate-your-account)) by
 only declaring a single tab.

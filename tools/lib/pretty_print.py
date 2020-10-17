@@ -1,13 +1,10 @@
+import subprocess
 from typing import Any, Dict, List
 
-from .template_parser import (
-    tokenize,
-    is_django_block_tag,
-)
+from zulint.printer import ENDC, GREEN
 
-from zulint.printer import GREEN, ENDC
+from .template_parser import is_django_block_tag, tokenize
 
-import subprocess
 
 def pretty_print_html(html: str, num_spaces: int = 4) -> str:
     # We use 1-based indexing for both rows and columns.
@@ -17,23 +14,24 @@ def pretty_print_html(html: str, num_spaces: int = 4) -> str:
     # We will keep a stack of "start" tags so that we know
     # when HTML ranges end.  Note that some start tags won't
     # be blocks from an indentation standpoint.
-    stack = []  # type: List[Dict[str, Any]]
+    stack: List[Dict[str, Any]] = []
 
     # Seed our stack with a pseudo entry to make depth calculations
     # easier.
-    info = dict(
+    info: Dict[str, Any] = dict(
         block=False,
         depth=-1,
         line=-1,
         token_kind='html_start',
         tag='html',
         extra_indent=0,
-        ignore_lines=[])  # type: Dict[str, Any]
+        ignore_lines=[],
+    )
     stack.append(info)
 
     # Our main job is to figure out offsets that we use to nudge lines
     # over by.
-    offsets = {}  # type: Dict[int, int]
+    offsets: Dict[int, int] = {}
 
     # Loop through our start/end tokens, and calculate offsets.  As
     # we proceed, we will push/pop info dictionaries on/off a stack.
@@ -42,7 +40,7 @@ def pretty_print_html(html: str, num_spaces: int = 4) -> str:
         if token.kind in ('html_start', 'handlebars_start', 'handlebars_singleton',
                           'html_singleton', 'django_start',
                           'jinja2_whitespace_stripped_type2_start',
-                          'jinja2_whitespace_stripped_start') and stack[-1]['tag'] != 'pre':
+                          'jinja2_whitespace_stripped_start',) and stack[-1]['tag'] != 'pre':
             # An HTML start tag should only cause a new indent if we
             # are on a new line.
             if (token.tag not in ('extends', 'include', 'else', 'elif') and
@@ -84,7 +82,7 @@ def pretty_print_html(html: str, num_spaces: int = 4) -> str:
                         adjustment=adjustment,
                         indenting=True,
                         adjust_offset_until=token.line,
-                        ignore_lines=[]
+                        ignore_lines=[],
                     )
                     if token.kind in ('handlebars_start', 'django_start'):
                         info.update(dict(depth=new_depth - 1, indenting=False))
@@ -97,12 +95,12 @@ def pretty_print_html(html: str, num_spaces: int = 4) -> str:
                         tag=token.tag,
                         token_kind=token.kind,
                         extra_indent=stack[-1]['extra_indent'],
-                        ignore_lines=[]
+                        ignore_lines=[],
                     )
                 stack.append(info)
         elif (token.kind in ('html_end', 'handlebars_end', 'html_singleton_end',
                              'django_end', 'handlebars_singleton_end',
-                             'jinja2_whitespace_stripped_end') and
+                             'jinja2_whitespace_stripped_end',) and
               (stack[-1]['tag'] != 'pre' or token.tag == 'pre')):
             info = stack.pop()
             if info['block']:
@@ -202,13 +200,8 @@ def validate_indent_html(fn: str, fix: bool) -> int:
             # Since we successfully fixed the issues, we exit with status 0
             return 0
         print('Invalid Indentation detected in file: '
-              '%s\nDiff for the file against expected indented file:' % (fn,), flush=True)
-        with subprocess.Popen(
-                ['diff', fn, '-'],
-                stdin=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True) as p:
-            p.communicate(phtml)
+              f'{fn}\nDiff for the file against expected indented file:', flush=True)
+        subprocess.run(['diff', fn, '-'], input=phtml, universal_newlines=True)
         print()
         print("This problem can be fixed with the `--fix` option.")
         return 0

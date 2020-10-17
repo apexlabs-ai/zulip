@@ -10,7 +10,6 @@ from django.db.utils import IntegrityError
 from zerver.lib.actions import do_create_user
 from zerver.lib.initial_password import initial_password
 from zerver.lib.management import ZulipBaseCommand
-from zerver.models import email_to_username
 
 
 class Command(ZulipBaseCommand):
@@ -25,25 +24,18 @@ Omit both <email> and <full name> for interactive user creation.
         parser.add_argument('--this-user-has-accepted-the-tos',
                             dest='tos',
                             action="store_true",
-                            default=False,
                             help='Acknowledgement that the user has already accepted the ToS.')
         parser.add_argument('--password',
-                            dest='password',
-                            type=str,
-                            default='',
                             help='password of new user. For development only.'
                                  'Note that we recommend against setting '
                                  'passwords this way, since they can be snooped by any user account '
                                  'on the server via `ps -ef` or by any superuser with'
                                  'read access to the user\'s bash history.')
         parser.add_argument('--password-file',
-                            dest='password_file',
-                            type=str,
-                            default='',
                             help='The file containing the password of the new user.')
-        parser.add_argument('email', metavar='<email>', type=str, nargs='?', default=argparse.SUPPRESS,
+        parser.add_argument('email', metavar='<email>', nargs='?', default=argparse.SUPPRESS,
                             help='email address of new user')
-        parser.add_argument('full_name', metavar='<full name>', type=str, nargs='?',
+        parser.add_argument('full_name', metavar='<full name>', nargs='?',
                             default=argparse.SUPPRESS,
                             help='full name of new user')
         self.add_realm_args(parser, True, "The name of the existing realm to which to add the user.")
@@ -77,16 +69,22 @@ parameters, or specify no parameters for interactive user creation.""")
                 full_name = input("Full name: ")
 
         try:
-            if options['password_file']:
+            if options['password_file'] is not None:
                 with open(options['password_file']) as f:
-                    pw = f.read()
-            elif options['password']:
+                    pw = f.read().strip()
+            elif options['password'] is not None:
                 pw = options['password']
             else:
                 user_initial_password = initial_password(email)
                 if user_initial_password is None:
                     raise CommandError("Password is unusable.")
                 pw = user_initial_password
-            do_create_user(email, pw, realm, full_name, email_to_username(email))
+            do_create_user(
+                email,
+                pw,
+                realm,
+                full_name,
+                acting_user=None,
+            )
         except IntegrityError:
             raise CommandError("User already exists.")

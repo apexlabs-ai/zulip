@@ -12,7 +12,7 @@ class Command(ZulipBaseCommand):
     fmt = '%-30s %-16s  %-32s'
 
     def add_arguments(self, parser: ArgumentParser) -> None:
-        parser.add_argument('emails', metavar='<email>', type=str, nargs='*',
+        parser.add_argument('emails', metavar='<email>', nargs='*',
                             help="email of user to show password and API key for")
         self.add_realm_args(parser)
 
@@ -21,7 +21,7 @@ class Command(ZulipBaseCommand):
         print(self.fmt % ('email', 'password', 'API key'))
         for email in options['emails']:
             if '@' not in email:
-                print('ERROR: %s does not look like an email address' % (email,))
+                print(f'ERROR: {email} does not look like an email address')
                 continue
             user = self.get_user(email, realm)
             print(self.fmt % (email, initial_password(email), get_api_key(user)))

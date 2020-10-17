@@ -1,4 +1,6 @@
-const FoldDict = require('./fold_dict').FoldDict;
+"use strict";
+
+const {FoldDict} = require("./fold_dict");
 
 let user_group_name_dict;
 let user_group_by_id_dict;
@@ -28,9 +30,9 @@ exports.remove = function (user_group) {
 exports.get_user_group_from_id = function (group_id, suppress_errors) {
     if (!user_group_by_id_dict.has(group_id)) {
         if (suppress_errors === undefined) {
-            blueslip.error('Unknown group_id in get_user_group_from_id: ' + group_id);
+            blueslip.error("Unknown group_id in get_user_group_from_id: " + group_id);
         }
-        return;
+        return undefined;
     }
     return user_group_by_id_dict.get(group_id);
 };
@@ -54,9 +56,7 @@ exports.get_user_group_from_name = function (name) {
 };
 
 exports.get_realm_user_groups = function () {
-    return Array.from(user_group_by_id_dict.values()).sort(function (a, b) {
-        return a.id - b.id;
-    });
+    return Array.from(user_group_by_id_dict.values()).sort((a, b) => a.id - b.id);
 };
 
 exports.is_member_of = function (user_group_id, user_id) {
@@ -91,7 +91,7 @@ exports.initialize = function (params) {
 };
 
 exports.is_user_group = function (item) {
-    return item.hasOwnProperty('members');
+    return item.members !== undefined;
 };
 
 window.user_groups = exports;

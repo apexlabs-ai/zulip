@@ -77,10 +77,9 @@ as world-readable, whereas the "uploaded files" one is not.
 
 It's simplest to just do this configuration when setting up your Zulip
 server for production usage.  Note that if you had any existing
-uploading files, this process does not upload them to Amazon S3.  If
-you have an existing server and are upgrading to the S3 backend, ask
-in [#production help on chat.zulip.org][production-help] for advice on
-how to migrate your data.
+uploading files, this process does not upload them to Amazon S3; see
+[migration instructions](#migrating-from-local-uploads-to-amazon-s3-backend)
+below for those steps.
 
 [production-help]: https://chat.zulip.org/#narrow/stream/31-production-help
 
@@ -149,7 +148,7 @@ As you scale your server, you might want to migrate the uploads from
 your local backend to Amazon S3.  Follow these instructions, step by
 step, to do the migration.
 
-1. First, [setup the S3 backend](#s3-backend-configuration) in the settings
+1. First, [set up the S3 backend](#s3-backend-configuration) in the settings
     (all the auth stuff), but leave `LOCAL_UPLOADS_DIR` set -- the
     migration tool will need that value to know where to find your uploads.
 2. Run `./manage.py transfer_uploads_to_s3`. This will upload all the

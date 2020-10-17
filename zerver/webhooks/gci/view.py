@@ -2,7 +2,7 @@ from typing import Any, Dict, Optional
 
 from django.http import HttpRequest, HttpResponse
 
-from zerver.decorator import api_key_only_webhook_view
+from zerver.decorator import webhook_view
 from zerver.lib.request import REQ, has_request_variables
 from zerver.lib.response import json_success
 from zerver.lib.webhooks.common import check_send_webhook_message
@@ -13,7 +13,7 @@ GCI_TOPIC_TEMPLATE = '{student_name}'
 
 
 def build_instance_url(instance_id: str) -> str:
-    return "https://codein.withgoogle.com/dashboard/task-instances/{}/".format(instance_id)
+    return f"https://codein.withgoogle.com/dashboard/task-instances/{instance_id}/"
 
 class UnknownEventType(Exception):
     pass
@@ -100,7 +100,7 @@ def get_outoftime_event_body(payload: Dict[str, Any]) -> str:
         task_url=build_instance_url(payload['task_instance']),
     )
 
-@api_key_only_webhook_view("Google-Code-In")
+@webhook_view("Google-Code-In")
 @has_request_variables
 def api_gci_webhook(request: HttpRequest, user_profile: UserProfile,
                     payload: Dict[str, Any]=REQ(argument_type='body')) -> HttpResponse:
@@ -108,7 +108,7 @@ def api_gci_webhook(request: HttpRequest, user_profile: UserProfile,
     if event is not None:
         body = get_body_based_on_event(event)(payload)
         subject = GCI_TOPIC_TEMPLATE.format(
-            student_name=payload['task_claimed_by']
+            student_name=payload['task_claimed_by'],
         )
         check_send_webhook_message(request, user_profile, subject, body)
 
@@ -132,7 +132,7 @@ def get_event(payload: Dict[str, Any]) -> Optional[str]:
     if event in EVENTS_FUNCTION_MAPPER:
         return event
 
-    raise UnknownEventType("Event '{}' is unknown and cannot be handled".format(event))  # nocoverage
+    raise UnknownEventType(f"Event '{event}' is unknown and cannot be handled")  # nocoverage
 
 def get_body_based_on_event(event: str) -> Any:
     return EVENTS_FUNCTION_MAPPER[event]

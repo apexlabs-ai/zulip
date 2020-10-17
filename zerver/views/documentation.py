@@ -1,21 +1,22 @@
-from typing import Any, Dict, Tuple
-from collections import OrderedDict
-from django.views.generic import TemplateView
-from django.conf import settings
-from django.http import HttpRequest, HttpResponse, HttpResponseNotFound
-from django.template import loader
-
 import os
 import random
 import re
+from collections import OrderedDict
+from typing import Any, Dict, Tuple
 
-from zerver.lib.integrations import CATEGORIES, INTEGRATIONS, HubotIntegration, \
-    WebhookIntegration
-from zerver.lib.request import has_request_variables, REQ
+from django.conf import settings
+from django.http import HttpRequest, HttpResponse, HttpResponseNotFound
+from django.template import loader
+from django.views.generic import TemplateView
+
+from zerver.context_processors import zulip_default_context
+from zerver.decorator import add_google_analytics_context
+from zerver.lib.integrations import CATEGORIES, INTEGRATIONS, HubotIntegration, WebhookIntegration
+from zerver.lib.request import REQ, has_request_variables
 from zerver.lib.subdomains import get_subdomain
 from zerver.models import Realm
 from zerver.templatetags.app_filters import render_markdown_path
-from zerver.context_processors import zulip_default_context
+
 
 def add_api_uri_context(context: Dict[str, Any], request: HttpRequest) -> None:
     context.update(zulip_default_context(request))
@@ -81,7 +82,7 @@ class MarkdownDirectoryView(ApiURLView):
 
     def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
         article = kwargs["article"]
-        context = super().get_context_data()  # type: Dict[str, Any]
+        context: Dict[str, Any] = super().get_context_data()
         (context["article"], http_status_ignored) = self.get_path(article)
 
         # For disabling the "Back to home" on the homepage
@@ -90,14 +91,11 @@ class MarkdownDirectoryView(ApiURLView):
             context["page_is_help_center"] = True
             context["doc_root"] = "/help/"
             (sidebar_index, http_status_ignored) = self.get_path("include/sidebar_index")
-            # We want the sliding/collapsing behavior for /help pages only
-            sidebar_class = "sidebar slide"
             title_base = "Zulip Help Center"
         else:
             context["page_is_api_center"] = True
             context["doc_root"] = "/api/"
             (sidebar_index, http_status_ignored) = self.get_path("sidebar_index")
-            sidebar_class = "sidebar"
             title_base = "Zulip API Documentation"
 
         # The following is a somewhat hacky approach to extract titles from articles.
@@ -109,20 +107,20 @@ class MarkdownDirectoryView(ApiURLView):
             # Strip the header and then use the first line to get the article title
             article_title = first_line.lstrip("#").strip()
             if context["not_index_page"]:
-                context["OPEN_GRAPH_TITLE"] = "%s (%s)" % (article_title, title_base)
+                context["OPEN_GRAPH_TITLE"] = f"{article_title} ({title_base})"
             else:
                 context["OPEN_GRAPH_TITLE"] = title_base
             self.request.placeholder_open_graph_description = (
-                "REPLACMENT_OPEN_GRAPH_DESCRIPTION_%s" % (int(2**24 * random.random()),))
+                f"REPLACMENT_OPEN_GRAPH_DESCRIPTION_{int(2**24 * random.random())}")
             context["OPEN_GRAPH_DESCRIPTION"] = self.request.placeholder_open_graph_description
 
         context["sidebar_index"] = sidebar_index
-        context["sidebar_class"] = sidebar_class
         # An "article" might require the api_uri_context to be rendered
-        api_uri_context = {}  # type: Dict[str, Any]
+        api_uri_context: Dict[str, Any] = {}
         add_api_uri_context(api_uri_context, self.request)
         api_uri_context["run_content_validators"] = True
         context["api_uri_context"] = api_uri_context
+        add_google_analytics_context(context)
         return context
 
     def get(self, request: HttpRequest, article: str="") -> HttpResponse:
@@ -151,12 +149,12 @@ def add_integrations_open_graph_context(context: Dict[str, Any], request: HttpRe
 
     if path_name in INTEGRATIONS:
         integration = INTEGRATIONS[path_name]
-        context['OPEN_GRAPH_TITLE'] = 'Connect {name} to Zulip'.format(name=integration.display_name)
+        context['OPEN_GRAPH_TITLE'] = f'Connect {integration.display_name} to Zulip'
         context['OPEN_GRAPH_DESCRIPTION'] = description
 
     elif path_name in CATEGORIES:
         category = CATEGORIES[path_name]
-        context['OPEN_GRAPH_TITLE'] = 'Connect your {category} tools to Zulip'.format(category=category)
+        context['OPEN_GRAPH_TITLE'] = f'Connect your {category} tools to Zulip'
         context['OPEN_GRAPH_DESCRIPTION'] = description
 
     elif path_name == 'integrations':
@@ -167,9 +165,10 @@ class IntegrationView(ApiURLView):
     template_name = 'zerver/integrations/index.html'
 
     def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
-        context = super().get_context_data(**kwargs)  # type: Dict[str, Any]
+        context: Dict[str, Any] = super().get_context_data(**kwargs)
         add_integrations_context(context)
         add_integrations_open_graph_context(context, self.request)
+        add_google_analytics_context(context)
         return context
 
 
@@ -182,13 +181,12 @@ def integration_doc(request: HttpRequest, integration_name: str=REQ()) -> HttpRe
     except KeyError:
         return HttpResponseNotFound()
 
-    context = {}  # type: Dict[str, Any]
+    context: Dict[str, Any] = {}
     add_api_uri_context(context, request)
 
     context['integration_name'] = integration.name
     context['integration_display_name'] = integration.display_name
-    if hasattr(integration, 'stream_name'):
-        context['recommended_stream_name'] = integration.stream_name
+    context['recommended_stream_name'] = integration.stream_name
     if isinstance(integration, WebhookIntegration):
         context['integration_url'] = integration.url[3:]
     if isinstance(integration, HubotIntegration):

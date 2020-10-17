@@ -21,8 +21,7 @@ spec:
     exporting-from-hipchat-server-or-data-center-for-data-portability-950821555.html
 '''
 
-from django.core.management.base import BaseCommand, CommandError, \
-    CommandParser
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from zerver.data_import.hipchat import do_convert_data
 
@@ -36,20 +35,18 @@ class Command(BaseCommand):
                             help="tar of Hipchat data")
 
         parser.add_argument('--output', dest='output_dir',
-                            action="store",
                             help='Directory to write exported data to.')
 
         parser.add_argument('--mask', dest='masking_content',
                             action="store_true",
                             help='Mask the content for privacy during QA.')
 
-        parser.add_argument('--slim-mode', dest='slim_mode',
+        parser.add_argument('--slim-mode',
                             action="store_true",
                             help="Default to no public stream subscriptions if no token is available." +
                             "  See import docs for details.")
 
         parser.add_argument('--token', dest='api_token',
-                            action="store",
                             help='API token for the HipChat API for fetching subscribers.')
 
         parser.formatter_class = argparse.RawTextHelpFormatter
@@ -72,7 +69,7 @@ class Command(BaseCommand):
 
         for path in options['hipchat_tar']:
             if not os.path.exists(path):
-                raise CommandError("Tar file not found: '%s'" % (path,))
+                raise CommandError(f"Tar file not found: '{path}'")
 
             print("Converting Data ...")
             do_convert_data(

@@ -2,11 +2,11 @@ from typing import Any, Dict
 
 from django.http import HttpRequest, HttpResponse
 
-from zerver.decorator import api_key_only_webhook_view
+from zerver.decorator import webhook_view
+from zerver.lib.exceptions import UnsupportedWebhookEventType
 from zerver.lib.request import REQ, has_request_variables
 from zerver.lib.response import json_success
-from zerver.lib.webhooks.common import UnexpectedWebhookEventType, \
-    check_send_webhook_message
+from zerver.lib.webhooks.common import check_send_webhook_message
 from zerver.models import UserProfile
 
 TRAFFIC_SPIKE_TEMPLATE = '[{website_name}]({website_url}) has {user_num} visitors online.'
@@ -19,7 +19,7 @@ The {status} **{name}** messaged:
 """.strip()
 
 
-@api_key_only_webhook_view('GoSquared')
+@webhook_view('GoSquared')
 @has_request_variables
 def api_gosquared_webhook(request: HttpRequest, user_profile: UserProfile,
                           payload: Dict[str, Dict[str, Any]]=REQ(argument_type='body')) -> HttpResponse:
@@ -38,7 +38,7 @@ def api_gosquared_webhook(request: HttpRequest, user_profile: UserProfile,
         body = TRAFFIC_SPIKE_TEMPLATE.format(website_name=domain_name,
                                              website_url=acc_url,
                                              user_num=user_num)
-        topic = 'GoSquared - {website_name}'.format(website_name=domain_name)
+        topic = f'GoSquared - {domain_name}'
         check_send_webhook_message(request, user_profile, topic, body)
 
     # Live chat message event
@@ -47,14 +47,14 @@ def api_gosquared_webhook(request: HttpRequest, user_profile: UserProfile,
         # Only support non-private messages
         if not payload['message']['private']:
             session_title = payload['message']['session']['title']
-            topic = 'Live Chat Session - {}'.format(session_title)
+            topic = f'Live Chat Session - {session_title}'
             body = CHAT_MESSAGE_TEMPLATE.format(
                 status=payload['person']['status'],
                 name=payload['person']['_anon']['name'],
-                content=payload['message']['content']
+                content=payload['message']['content'],
             )
             check_send_webhook_message(request, user_profile, topic, body)
     else:
-        raise UnexpectedWebhookEventType('GoSquared', 'unknown_event')
+        raise UnsupportedWebhookEventType('unknown_event')
 
     return json_success()

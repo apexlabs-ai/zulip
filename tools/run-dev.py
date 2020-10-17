@@ -1,33 +1,30 @@
 #!/usr/bin/env python3
-
 import argparse
 import os
 import pwd
 import signal
-import socket
 import subprocess
 import sys
-import traceback
-
+from typing import Any, Callable, Generator, List, Sequence
 from urllib.parse import urlunparse
 
 # check for the venv
 from lib import sanity_check
+
 sanity_check.check_venv(__file__)
 
-from tornado import httpclient
-from tornado import httputil
-from tornado import gen
-from tornado import web
+from tornado import gen, httpclient, httputil, web
 from tornado.ioloop import IOLoop
 
-from typing import Any, Callable, Generator, List, Optional
+TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(TOOLS_DIR))
+
+from tools.lib.test_script import assert_provisioning_status_ok
 
 if 'posix' in os.name and os.geteuid() == 0:
     raise RuntimeError("run-dev.py should not be run as root.")
 
-parser = argparse.ArgumentParser(description=r"""
-
+DESCRIPTION = '''
 Starts the app listening on localhost, for local development.
 
 This script launches the Django and Tornado servers, then runs a reverse proxy
@@ -38,14 +35,10 @@ which serves to both of them.  After it's all up and running, browse to
 Note that, while runserver and runtornado have the usual auto-restarting
 behavior, the reverse proxy itself does *not* automatically restart on changes
 to this file.
-""",
-                                 formatter_class=argparse.RawTextHelpFormatter)
+'''
 
-TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(TOOLS_DIR))
-from tools.lib.test_script import (
-    assert_provisioning_status_ok,
-)
+parser = argparse.ArgumentParser(description=DESCRIPTION,
+                                 formatter_class=argparse.RawTextHelpFormatter)
 
 parser.add_argument('--test',
                     action='store_true',
@@ -54,17 +47,19 @@ parser.add_argument('--minify',
                     action='store_true',
                     help='Minifies assets for testing in dev')
 parser.add_argument('--interface',
-                    action='store',
-                    default=None, help='Set the IP or hostname for the proxy to listen on')
+                    help='Set the IP or hostname for the proxy to listen on')
 parser.add_argument('--no-clear-memcached',
                     action='store_false', dest='clear_memcached',
-                    default=True, help='Do not clear memcached')
+                    help='Do not clear memcached')
+parser.add_argument('--streamlined',
+                    action="store_true",
+                    help='Avoid thumbor, etc.')
 parser.add_argument('--force',
                     action="store_true",
-                    default=False, help='Run command despite possible problems.')
+                    help='Run command despite possible problems.')
 parser.add_argument('--enable-tornado-logging',
                     action="store_true",
-                    default=False, help='Enable access logs from tornado proxy server.')
+                    help='Enable access logs from tornado proxy server.')
 options = parser.parse_args()
 
 assert_provisioning_status_ok(options.force)
@@ -79,30 +74,28 @@ if options.interface is None:
         # host.  The same argument applies to the remote development
         # servers using username "zulipdev".
         options.interface = None
-        if user_name == "zulipdev":
-            os.environ.setdefault("EXTERNAL_HOST", socket.gethostname() + ":9991")
     else:
         # Otherwise, only listen to requests on localhost for security.
         options.interface = "127.0.0.1"
 elif options.interface == "":
     options.interface = None
 
-runserver_args = []  # type: List[str]
+runserver_args: List[str] = []
 base_port = 9991
 if options.test:
     base_port = 9981
     settings_module = "zproject.test_settings"
-    # Don't auto-reload when running casper tests
+    # Don't auto-reload when running puppeteer tests
     runserver_args = ['--noreload']
 else:
     settings_module = "zproject.settings"
 
-manage_args = ['--settings=%s' % (settings_module,)]
+manage_args = [f'--settings={settings_module}']
 os.environ['DJANGO_SETTINGS_MODULE'] = settings_module
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from scripts.lib.zulip_tools import WARNING, ENDC
+from scripts.lib.zulip_tools import CYAN, ENDC, FAIL, WARNING
 
 proxy_port = base_port
 django_port = base_port + 1
@@ -128,7 +121,7 @@ os.setpgrp()
 # terminal in question.
 
 if options.test:
-    pid_file_path = os.path.join(os.path.join(os.getcwd(), 'var/casper/run_dev.pid'))
+    pid_file_path = os.path.join(os.path.join(os.getcwd(), 'var/puppeteer/run_dev.pid'))
 else:
     pid_file_path = os.path.join(os.path.join(os.getcwd(), 'var/run/run_dev.pid'))
 
@@ -138,26 +131,40 @@ if not os.path.exists(os.path.dirname(pid_file_path)):
 with open(pid_file_path, 'w+') as f:
     f.write(str(os.getpgrp()) + "\n")
 
-# Pass --nostatic because we configure static serving ourselves in
-# zulip/urls.py.
-cmds = [['./manage.py', 'runserver'] +
-        manage_args + runserver_args + ['127.0.0.1:%d' % (django_port,)],
-        ['env', 'PYTHONUNBUFFERED=1', './manage.py', 'runtornado'] +
-        manage_args + ['127.0.0.1:%d' % (tornado_port,)],
-        ['./manage.py', 'process_queue', '--all'] + manage_args,
+def server_processes() -> List[List[str]]:
+    main_cmds = [
+        ['./manage.py', 'runserver',
+         *manage_args, *runserver_args, f'127.0.0.1:{django_port}'],
+        ['env', 'PYTHONUNBUFFERED=1', './manage.py', 'runtornado',
+         *manage_args, f'127.0.0.1:{tornado_port}'],
+    ]
+
+    if options.streamlined:
+        # The streamlined operation allows us to do many
+        # things, but search/thumbor/etc. features won't work.
+        return main_cmds
+
+    other_cmds = [
+        ['./manage.py', 'process_queue', '--all', *manage_args],
         ['env', 'PGHOST=127.0.0.1',  # Force password authentication using .pgpass
-         './puppet/zulip/files/postgresql/process_fts_updates'],
+         './puppet/zulip/files/postgresql/process_fts_updates', '--quiet'],
         ['./manage.py', 'deliver_scheduled_messages'],
-        ['/srv/zulip-thumbor-venv/bin/thumbor', '-c', './zthumbor/thumbor.conf',
-         '-p', '%s' % (thumbor_port,)]]
-if options.test:
+        ['/srv/zulip-thumbor-venv/bin/thumbor', '--conf=./zthumbor/thumbor_settings.py',
+         f'--port={thumbor_port}'],
+    ]
+
+    # NORMAL (but slower) operation:
+    return main_cmds + other_cmds
+
+def do_one_time_webpack_compile() -> None:
     # We just need to compile webpack assets once at startup, not run a daemon,
     # in test mode.  Additionally, webpack-dev-server doesn't support running 2
-    # copies on the same system, so this model lets us run the casper tests
+    # copies on the same system, so this model lets us run the puppeteer tests
     # with a running development server.
     subprocess.check_call(['./tools/webpack', '--quiet', '--test'])
-else:
-    webpack_cmd = ['./tools/webpack', '--watch', '--port', str(webpack_port)]
+
+def start_webpack_watcher() -> "subprocess.Popen[bytes]":
+    webpack_cmd = ['./tools/webpack', '--watch', f'--port={webpack_port}']
     if options.minify:
         webpack_cmd.append('--minify')
     if options.interface is None:
@@ -165,13 +172,10 @@ else:
         # to disable the webpack host check so that webpack will serve assets.
         webpack_cmd.append('--disable-host-check')
     if options.interface:
-        webpack_cmd += ["--host", options.interface]
+        webpack_cmd.append(f"--host={options.interface}")
     else:
-        webpack_cmd += ["--host", "0.0.0.0"]
-    cmds.append(webpack_cmd)
-for cmd in cmds:
-    subprocess.Popen(cmd)
-
+        webpack_cmd.append("--host=0.0.0.0")
+    return subprocess.Popen(webpack_cmd)
 
 def transform_url(protocol: str, path: str, query: str, target_port: int, target_host: str) -> str:
     # generate url with target host
@@ -183,7 +187,6 @@ def transform_url(protocol: str, path: str, query: str, target_port: int, target
     newpath = urlunparse((protocol, host, path, '', query, ''))
     return newpath
 
-
 @gen.engine
 def fetch_request(url: str, callback: Any, **kwargs: Any) -> "Generator[Callable[..., Any], Any, None]":
     # use large timeouts to handle polling requests
@@ -192,7 +195,7 @@ def fetch_request(url: str, callback: Any, **kwargs: Any) -> "Generator[Callable
         connect_timeout=240.0,
         request_timeout=240.0,
         decompress_response=False,
-        **kwargs
+        **kwargs,
     )
     client = httpclient.AsyncHTTPClient()
     # wait for response
@@ -202,14 +205,13 @@ def fetch_request(url: str, callback: Any, **kwargs: Any) -> "Generator[Callable
 
 class BaseHandler(web.RequestHandler):
     # target server ip
-    target_host = '127.0.0.1'  # type: str
+    target_host: str = '127.0.0.1'
     # target server port
-    target_port = None  # type: int
+    target_port: int
 
     def _add_request_headers(
-        self, exclude_lower_headers_list: Optional[List[str]] = None
+        self, exclude_lower_headers_list: Sequence[str] = [],
     ) -> httputil.HTTPHeaders:
-        exclude_lower_headers_list = exclude_lower_headers_list or []
         headers = httputil.HTTPHeaders()
         for header, v in self.request.headers.get_all():
             if header.lower() not in exclude_lower_headers_list:
@@ -273,7 +275,7 @@ class BaseHandler(web.RequestHandler):
                 headers=self._add_request_headers(["upgrade-insecure-requests"]),
                 follow_redirects=False,
                 body=getattr(self.request, 'body'),
-                allow_nonstandard_methods=True
+                allow_nonstandard_methods=True,
             )
         except httpclient.HTTPError as e:
             if hasattr(e, 'response') and e.response:
@@ -300,14 +302,25 @@ class ThumborHandler(BaseHandler):
     target_port = thumbor_port
 
 
+class ErrorHandler(BaseHandler):
+    @web.asynchronous
+    def prepare(self) -> None:
+        print(FAIL + 'Unexpected request: ' + ENDC, self.request.path)
+        self.set_status(500)
+        self.write('path not supported')
+        self.finish()
+
+def using_thumbor() -> bool:
+    return not options.streamlined
+
 class Application(web.Application):
     def __init__(self, enable_logging: bool = False) -> None:
         handlers = [
             (r"/json/events.*", TornadoHandler),
             (r"/api/v1/events.*", TornadoHandler),
             (r"/webpack.*", WebPackHandler),
-            (r"/thumbor.*", ThumborHandler),
-            (r"/.*", DjangoHandler)
+            (r"/thumbor.*", ThumborHandler if using_thumbor() else ErrorHandler),
+            (r"/.*", DjangoHandler),
         ]
         super().__init__(handlers, enable_logging=enable_logging)
 
@@ -327,20 +340,38 @@ def shutdown_handler(*args: Any, **kwargs: Any) -> None:
     else:
         io_loop.stop()
 
-# log which services/ports will be started
-print("Starting Zulip services on ports: web proxy: {},".format(proxy_port),
-      "Django: {}, Tornado: {}, Thumbor: {}".format(django_port, tornado_port, thumbor_port),
-      end='')
-if options.test:
-    print("")  # no webpack for --test
-else:
-    print(", webpack: {}".format(webpack_port))
+def print_listeners() -> None:
+    print("\nZulip services will listen on ports:")
+    ports = [
+        (proxy_port, CYAN + 'web proxy' + ENDC),
+        (django_port, 'Django'),
+        (tornado_port, 'Tornado'),
+    ]
 
-print("".join((WARNING,
-               "Note: only port {} is exposed to the host in a Vagrant environment.".format(
-                   proxy_port), ENDC)))
+    if not options.test:
+        ports.append((webpack_port, 'webpack'))
+
+    if using_thumbor():
+        ports.append((thumbor_port, 'Thumbor'))
+
+    for port, label in ports:
+        print(f'   {port}: {label}')
+    print()
+
+    proxy_warning = f"Only the proxy port ({proxy_port}) is exposed."
+    print(WARNING + "Note to Vagrant users: " + ENDC + proxy_warning + '\n')
+
+children = []
 
 try:
+    if options.test:
+        do_one_time_webpack_compile()
+    else:
+        children.append(start_webpack_watcher())
+
+    for cmd in server_processes():
+        children.append(subprocess.Popen(cmd))
+
     app = Application(enable_logging=options.enable_tornado_logging)
     try:
         app.listen(proxy_port, address=options.interface)
@@ -348,16 +379,20 @@ try:
         if e.errno == 98:
             print('\n\nERROR: You probably have another server running!!!\n\n')
         raise
+
+    print_listeners()
+
     ioloop = IOLoop.instance()
     for s in (signal.SIGINT, signal.SIGTERM):
         signal.signal(s, shutdown_handler)
     ioloop.start()
-except Exception:
-    # Print the traceback before we get SIGTERM and die.
-    traceback.print_exc()
-    raise
 finally:
-    # Kill everything in our process group.
-    os.killpg(0, signal.SIGTERM)
+    for child in children:
+        child.terminate()
+
+    print("Waiting for children to stop...")
+    for child in children:
+        child.wait()
+
     # Remove pid file when development server closed correctly.
     os.remove(pid_file_path)

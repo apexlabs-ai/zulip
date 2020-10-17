@@ -1,25 +1,11 @@
-import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 from django.db import connection
-from django.db.models.query import QuerySet, Q
-from django.utils.timezone import now as timezone_now
-
-from sqlalchemy.sql import (
-    column,
-    literal,
-    func,
-)
+from django.db.models.query import Q, QuerySet
+from sqlalchemy.sql import column, func, literal
 
 from zerver.lib.request import REQ
-from zerver.models import (
-    Message,
-    Recipient,
-    Stream,
-    UserMessage,
-    UserProfile,
-)
-
-from typing import Any, Dict, List, Optional, Tuple
+from zerver.models import Message, Stream, UserMessage, UserProfile
 
 # Only use these constants for events.
 ORIG_TOPIC = "orig_subject"
@@ -109,11 +95,11 @@ def save_message_for_edit_use_case(message: Message) -> None:
 
 
 def user_message_exists_for_topic(user_profile: UserProfile,
-                                  recipient: Recipient,
+                                  recipient_id: int,
                                   topic_name: str) -> bool:
     return UserMessage.objects.filter(
         user_profile=user_profile,
-        message__recipient=recipient,
+        message__recipient_id=recipient_id,
         message__subject__iexact=topic_name,
     ).exists()
 
@@ -122,23 +108,15 @@ def update_messages_for_topic_edit(message: Message,
                                    orig_topic_name: str,
                                    topic_name: Optional[str],
                                    new_stream: Optional[Stream]) -> List[Message]:
-    propagate_query = Q(recipient = message.recipient, subject = orig_topic_name)
+    propagate_query = Q(recipient = message.recipient, subject__iexact = orig_topic_name)
     if propagate_mode == 'change_all':
-        # We only change messages up to 7 days in the past, to avoid hammering our
-        # DB by changing an unbounded amount of messages
-        #
-        # TODO: Look at removing this restriction and/or add a "change_last_week"
-        # option; this behavior feels buggy.
-        before_bound = timezone_now() - datetime.timedelta(days=7)
-
-        propagate_query = (propagate_query & ~Q(id = message.id) &
-                           Q(date_sent__range=(before_bound, timezone_now())))
+        propagate_query = propagate_query & ~Q(id = message.id)
     if propagate_mode == 'change_later':
         propagate_query = propagate_query & Q(id__gt = message.id)
 
     messages = Message.objects.filter(propagate_query).select_related()
 
-    update_fields = {}
+    update_fields: Dict[str, object] = {}
 
     # Evaluate the query before running the update
     messages_list = list(messages)
@@ -161,7 +139,7 @@ def update_messages_for_topic_edit(message: Message,
     return messages_list
 
 def generate_topic_history_from_db_rows(rows: List[Tuple[str, int]]) -> List[Dict[str, Any]]:
-    canonical_topic_names = {}  # type: Dict[str, Tuple[int, str]]
+    canonical_topic_names: Dict[str, Tuple[int, str]] = {}
 
     # Sort rows by max_message_id so that if a topic
     # has many different casings, we use the most
@@ -176,54 +154,11 @@ def generate_topic_history_from_db_rows(rows: List[Tuple[str, int]]) -> List[Dic
     for canonical_topic, (max_message_id, topic_name) in canonical_topic_names.items():
         history.append(dict(
             name=topic_name,
-            max_id=max_message_id)
+            max_id=max_message_id),
         )
     return sorted(history, key=lambda x: -x['max_id'])
 
-def get_topic_history_for_stream(user_profile: UserProfile,
-                                 recipient: Recipient,
-                                 public_history: bool) -> List[Dict[str, Any]]:
-    cursor = connection.cursor()
-    if public_history:
-        query = '''
-        SELECT
-            "zerver_message"."subject" as topic,
-            max("zerver_message".id) as max_message_id
-        FROM "zerver_message"
-        WHERE (
-            "zerver_message"."recipient_id" = %s
-        )
-        GROUP BY (
-            "zerver_message"."subject"
-        )
-        ORDER BY max("zerver_message".id) DESC
-        '''
-        cursor.execute(query, [recipient.id])
-    else:
-        query = '''
-        SELECT
-            "zerver_message"."subject" as topic,
-            max("zerver_message".id) as max_message_id
-        FROM "zerver_message"
-        INNER JOIN "zerver_usermessage" ON (
-            "zerver_usermessage"."message_id" = "zerver_message"."id"
-        )
-        WHERE (
-            "zerver_usermessage"."user_profile_id" = %s AND
-            "zerver_message"."recipient_id" = %s
-        )
-        GROUP BY (
-            "zerver_message"."subject"
-        )
-        ORDER BY max("zerver_message".id) DESC
-        '''
-        cursor.execute(query, [user_profile.id, recipient.id])
-    rows = cursor.fetchall()
-    cursor.close()
-
-    return generate_topic_history_from_db_rows(rows)
-
-def get_topic_history_for_web_public_stream(recipient: Recipient) -> List[Dict[str, Any]]:
+def get_topic_history_for_public_stream(recipient_id: int) -> List[Dict[str, Any]]:
     cursor = connection.cursor()
     query = '''
     SELECT
@@ -238,7 +173,37 @@ def get_topic_history_for_web_public_stream(recipient: Recipient) -> List[Dict[s
     )
     ORDER BY max("zerver_message".id) DESC
     '''
-    cursor.execute(query, [recipient.id])
+    cursor.execute(query, [recipient_id])
+    rows = cursor.fetchall()
+    cursor.close()
+
+    return generate_topic_history_from_db_rows(rows)
+
+def get_topic_history_for_stream(user_profile: UserProfile,
+                                 recipient_id: int,
+                                 public_history: bool) -> List[Dict[str, Any]]:
+    if public_history:
+        return get_topic_history_for_public_stream(recipient_id)
+
+    cursor = connection.cursor()
+    query = '''
+    SELECT
+        "zerver_message"."subject" as topic,
+        max("zerver_message".id) as max_message_id
+    FROM "zerver_message"
+    INNER JOIN "zerver_usermessage" ON (
+        "zerver_usermessage"."message_id" = "zerver_message"."id"
+    )
+    WHERE (
+        "zerver_usermessage"."user_profile_id" = %s AND
+        "zerver_message"."recipient_id" = %s
+    )
+    GROUP BY (
+        "zerver_message"."subject"
+    )
+    ORDER BY max("zerver_message".id) DESC
+    '''
+    cursor.execute(query, [user_profile.id, recipient_id])
     rows = cursor.fetchall()
     cursor.close()
 

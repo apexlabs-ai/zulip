@@ -1,13 +1,14 @@
+import base64
 import os
-import time
-import ujson
 import smtplib
-import re
+import time
+from collections import defaultdict
+from typing import Any, Callable, Dict, List, Mapping, Optional
+from unittest.mock import MagicMock, patch
 
+import orjson
 from django.conf import settings
 from django.test import override_settings
-from mock import patch, MagicMock
-from typing import Any, Callable, Dict, List, Mapping, Tuple
 
 from zerver.lib.email_mirror import RateLimitedRealmMirror
 from zerver.lib.email_mirror_helpers import encode_email_address
@@ -15,109 +16,45 @@ from zerver.lib.queue import MAX_REQUEST_RETRIES
 from zerver.lib.rate_limiter import RateLimiterLockingException
 from zerver.lib.remote_server import PushNotificationBouncerRetryLaterError
 from zerver.lib.send_email import FromAddress
-from zerver.lib.streams import create_stream_if_needed
-from zerver.lib.test_helpers import simulated_queue_client
 from zerver.lib.test_classes import ZulipTestCase
-from zerver.models import get_client, UserActivity, PreregistrationUser, \
-    get_system_bot, get_stream, get_realm
+from zerver.lib.test_helpers import mock_queue_publish, simulated_queue_client
+from zerver.models import PreregistrationUser, UserActivity, get_client, get_realm, get_stream
 from zerver.tornado.event_queue import build_offline_notification
 from zerver.worker import queue_processors
 from zerver.worker.queue_processors import (
-    get_active_worker_queues,
-    QueueProcessingWorker,
     EmailSendingWorker,
     LoopQueueProcessingWorker,
     MissedMessageWorker,
-    SlowQueryWorker,
+    QueueProcessingWorker,
+    WorkerTimeoutException,
+    get_active_worker_queues,
 )
-
-from zerver.middleware import write_log_line
 
 Event = Dict[str, Any]
-
-# This is used for testing LoopQueueProcessingWorker, which
-# would run forever if we don't mock time.sleep to abort the
-# loop.
-class AbortLoop(Exception):
-    pass
-
-loopworker_sleep_mock = patch(
-    'zerver.worker.queue_processors.time.sleep',
-    side_effect=AbortLoop,
-)
 
 class WorkerTest(ZulipTestCase):
     class FakeClient:
         def __init__(self) -> None:
-            self.consumers = {}  # type: Dict[str, Callable[[Dict[str, Any]], None]]
-            self.queue = []  # type: List[Tuple[str, Any]]
+            self.queues: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 
-        def register_json_consumer(self,
-                                   queue_name: str,
-                                   callback: Callable[[Dict[str, Any]], None]) -> None:
-            self.consumers[queue_name] = callback
+        def enqueue(self, queue_name: str, data: Dict[str, Any]) -> None:
+            self.queues[queue_name].append(data)
 
-        def start_consuming(self) -> None:
-            for queue_name, data in self.queue:
-                callback = self.consumers[queue_name]
-                callback(data)
-            self.queue = []
+        def start_json_consumer(self,
+                                queue_name: str,
+                                callback: Callable[[List[Dict[str, Any]]], None],
+                                batch_size: int=1,
+                                timeout: Optional[int]=None) -> None:
+            chunk: List[Dict[str, Any]] = []
+            queue = self.queues[queue_name]
+            while queue:
+                chunk.append(queue.pop(0))
+                if len(chunk) >= batch_size or not len(queue):
+                    callback(chunk)
+                    chunk = []
 
-        def drain_queue(self, queue_name: str, json: bool) -> List[Event]:
-            assert json
-            events = [
-                dct
-                for (queue_name, dct)
-                in self.queue
-            ]
-
-            # IMPORTANT!
-            # This next line prevents us from double draining
-            # queues, which was a bug at one point.
-            self.queue = []
-
-            return events
-
-        def queue_size(self) -> int:
-            return len(self.queue)
-
-    @override_settings(SLOW_QUERY_LOGS_STREAM="errors")
-    def test_slow_queries_worker(self) -> None:
-        error_bot = get_system_bot(settings.ERROR_BOT)
-        fake_client = self.FakeClient()
-        worker = SlowQueryWorker()
-
-        create_stream_if_needed(error_bot.realm, 'errors')
-
-        send_mock = patch(
-            'zerver.worker.queue_processors.internal_send_stream_message'
-        )
-
-        with send_mock as sm, loopworker_sleep_mock as tm:
-            with simulated_queue_client(lambda: fake_client):
-                try:
-                    worker.setup()
-                    # `write_log_line` is where we publish slow queries to the queue.
-                    with patch('zerver.middleware.is_slow_query', return_value=True):
-                        write_log_line(log_data=dict(test='data'), requestor_for_logs='test@zulip.com',
-                                       remote_ip='127.0.0.1', client_name='website', path='/test/',
-                                       method='GET')
-                    worker.start()
-                except AbortLoop:
-                    pass
-
-        self.assertEqual(tm.call_args[0][0], 60)  # should sleep 60 seconds
-
-        sm.assert_called_once()
-        args = [c[0] for c in sm.call_args_list][0]
-        self.assertEqual(args[0], error_bot.realm)
-        self.assertEqual(args[1].email, error_bot.email)
-        self.assertEqual(args[2].name, "errors")
-        self.assertEqual(args[3], "testserver: slow queries")
-        # Testing for specific query times can lead to test discrepancies.
-        logging_info = re.sub(r'\(db: [0-9]+ms/\d+q\)', '', args[4])
-        self.assertEqual(logging_info, '    127.0.0.1       GET     200 -1000ms '
-                                       ' /test/ (test@zulip.com via website) (test@zulip.com)\n')
+        def local_queue_size(self) -> int:
+            return sum([len(q) for q in self.queues.values()])
 
     def test_UserActivityWorker(self) -> None:
         fake_client = self.FakeClient()
@@ -125,50 +62,54 @@ class WorkerTest(ZulipTestCase):
         user = self.example_user('hamlet')
         UserActivity.objects.filter(
             user_profile = user.id,
-            client = get_client('ios')
+            client = get_client('ios'),
         ).delete()
 
         data = dict(
             user_profile_id = user.id,
+            client_id = get_client('ios').id,
+            time = time.time(),
+            query = 'send_message',
+        )
+        fake_client.enqueue('user_activity', data)
+
+        # The block below adds an event using the old format,
+        # having the client name instead of id, to test the queue
+        # worker handles it correctly. That compatibility code can
+        # be deleted in a later release, and this test should then be cleaned up.
+        data_old_format = dict(
+            user_profile_id = user.id,
             client = 'ios',
             time = time.time(),
-            query = 'send_message'
+            query = 'send_message',
         )
-        fake_client.queue.append(('user_activity', data))
+        fake_client.enqueue('user_activity', data_old_format)
 
-        with loopworker_sleep_mock:
-            with simulated_queue_client(lambda: fake_client):
-                worker = queue_processors.UserActivityWorker()
-                worker.setup()
-                try:
-                    worker.start()
-                except AbortLoop:
-                    pass
-                activity_records = UserActivity.objects.filter(
-                    user_profile = user.id,
-                    client = get_client('ios')
-                )
-                self.assertTrue(len(activity_records), 1)
-                self.assertTrue(activity_records[0].count, 1)
+        with simulated_queue_client(lambda: fake_client):
+            worker = queue_processors.UserActivityWorker()
+            worker.setup()
+            worker.start()
+            activity_records = UserActivity.objects.filter(
+                user_profile = user.id,
+                client = get_client('ios'),
+            )
+            self.assertEqual(len(activity_records), 1)
+            self.assertEqual(activity_records[0].count, 2)
 
         # Now process the event a second time and confirm count goes
-        # up to 2.  Ideally, we'd use an event with a slightly never
+        # up. Ideally, we'd use an event with a slightly newer
         # time, but it's not really important.
-        fake_client.queue.append(('user_activity', data))
-        with loopworker_sleep_mock:
-            with simulated_queue_client(lambda: fake_client):
-                worker = queue_processors.UserActivityWorker()
-                worker.setup()
-                try:
-                    worker.start()
-                except AbortLoop:
-                    pass
-                activity_records = UserActivity.objects.filter(
-                    user_profile = user.id,
-                    client = get_client('ios')
-                )
-                self.assertTrue(len(activity_records), 1)
-                self.assertTrue(activity_records[0].count, 2)
+        fake_client.enqueue('user_activity', data)
+        with simulated_queue_client(lambda: fake_client):
+            worker = queue_processors.UserActivityWorker()
+            worker.setup()
+            worker.start()
+            activity_records = UserActivity.objects.filter(
+                user_profile = user.id,
+                client = get_client('ios'),
+            )
+            self.assertEqual(len(activity_records), 1)
+            self.assertEqual(activity_records[0].count, 3)
 
     def test_missed_message_worker(self) -> None:
         cordelia = self.example_user('cordelia')
@@ -207,7 +148,7 @@ class WorkerTest(ZulipTestCase):
 
         fake_client = self.FakeClient()
         for event in events:
-            fake_client.queue.append(('missedmessage_emails', event))
+            fake_client.enqueue('missedmessage_emails', event)
 
         mmw = MissedMessageWorker()
 
@@ -220,37 +161,39 @@ class WorkerTest(ZulipTestCase):
             def start(self) -> None:
                 self.is_running = True
 
-            def cancel(self) -> None:
-                self.is_running = False
-
         timer = MockTimer()
-        loopworker_sleep_mock = patch(
+        timer_mock = patch(
             'zerver.worker.queue_processors.Timer',
             return_value=timer,
         )
 
         send_mock = patch(
-            'zerver.lib.email_notifications.do_send_missedmessage_events_reply_in_zulip'
+            'zerver.lib.email_notifications.do_send_missedmessage_events_reply_in_zulip',
         )
         mmw.BATCH_DURATION = 0
 
         bonus_event = dict(user_profile_id=hamlet.id, message_id=hamlet3_msg_id)
 
-        with send_mock as sm, loopworker_sleep_mock as tm:
+        with send_mock as sm, timer_mock as tm:
             with simulated_queue_client(lambda: fake_client):
                 self.assertFalse(timer.is_alive())
                 mmw.setup()
                 mmw.start()
                 self.assertTrue(timer.is_alive())
-                fake_client.queue.append(('missedmessage_emails', bonus_event))
+                fake_client.enqueue('missedmessage_emails', bonus_event)
 
                 # Double-calling start is our way to get it to run again
                 self.assertTrue(timer.is_alive())
                 mmw.start()
+                with self.assertLogs(level='INFO') as info_logs:
+                    # Now, we actually send the emails.
+                    mmw.maybe_send_batched_emails()
+                self.assertEqual(info_logs.output, [
+                    'INFO:root:Batch-processing 3 missedmessage_emails events for user 10',
+                    'INFO:root:Batch-processing 1 missedmessage_emails events for user 12'
+                ])
 
-                # Now, we actually send the emails.
-                mmw.maybe_send_batched_emails()
-                self.assertFalse(timer.is_alive())
+                self.assertEqual(mmw.timer_event, None)
 
         self.assertEqual(tm.call_args[0][0], 5)  # should sleep 5 seconds
 
@@ -274,7 +217,7 @@ class WorkerTest(ZulipTestCase):
         self.assertEqual(othello_info['count'], 1)
         self.assertEqual(
             {m['message'].content for m in othello_info['missed_messages']},
-            {'where art thou, othello?'}
+            {'where art thou, othello?'},
         )
 
     def test_push_notifications_worker(self) -> None:
@@ -290,7 +233,7 @@ class WorkerTest(ZulipTestCase):
         def fake_publish(queue_name: str,
                          event: Dict[str, Any],
                          processor: Callable[[Any], None]) -> None:
-            fake_client.queue.append((queue_name, event))
+            fake_client.enqueue(queue_name, event)
 
         def generate_new_message_notification() -> Dict[str, Any]:
             return build_offline_notification(1, 1)
@@ -310,8 +253,8 @@ class WorkerTest(ZulipTestCase):
                     patch('zerver.worker.queue_processors.initialize_push_notifications'):
                 event_new = generate_new_message_notification()
                 event_remove = generate_remove_notification()
-                fake_client.queue.append(('missedmessage_mobile_notifications', event_new))
-                fake_client.queue.append(('missedmessage_mobile_notifications', event_remove))
+                fake_client.enqueue('missedmessage_mobile_notifications', event_new)
+                fake_client.enqueue('missedmessage_mobile_notifications', event_remove)
 
                 worker.start()
                 mock_handle_new.assert_called_once_with(event_new['user_profile_id'], event_new)
@@ -325,13 +268,17 @@ class WorkerTest(ZulipTestCase):
                     patch('zerver.worker.queue_processors.initialize_push_notifications'):
                 event_new = generate_new_message_notification()
                 event_remove = generate_remove_notification()
-                fake_client.queue.append(('missedmessage_mobile_notifications', event_new))
-                fake_client.queue.append(('missedmessage_mobile_notifications', event_remove))
+                fake_client.enqueue('missedmessage_mobile_notifications', event_new)
+                fake_client.enqueue('missedmessage_mobile_notifications', event_remove)
 
-                with patch('zerver.lib.queue.queue_json_publish', side_effect=fake_publish):
+                with mock_queue_publish('zerver.lib.queue.queue_json_publish', side_effect=fake_publish), \
+                        self.assertLogs('zerver.worker.queue_processors', 'WARNING') as warn_logs:
                     worker.start()
                     self.assertEqual(mock_handle_new.call_count, 1 + MAX_REQUEST_RETRIES)
                     self.assertEqual(mock_handle_remove.call_count, 1 + MAX_REQUEST_RETRIES)
+                self.assertEqual(warn_logs.output, [
+                    'WARNING:zerver.worker.queue_processors:Maximum retries exceeded for trigger:1 event:push_notification',
+                ] * 2)
 
     @patch('zerver.worker.queue_processors.mirror_email')
     def test_mirror_worker(self, mock_mirror_email: MagicMock) -> None:
@@ -340,13 +287,13 @@ class WorkerTest(ZulipTestCase):
         stream_to_address = encode_email_address(stream)
         data = [
             dict(
-                message='\xf3test',
+                msg_base64=base64.b64encode(b'\xf3test').decode(),
                 time=time.time(),
-                rcpt_to=stream_to_address
-            )
+                rcpt_to=stream_to_address,
+            ),
         ] * 3
         for element in data:
-            fake_client.queue.append(('email_mirror', element))
+            fake_client.enqueue('email_mirror', element)
 
         with simulated_queue_client(lambda: fake_client):
             worker = queue_processors.MirrorWorker()
@@ -367,15 +314,16 @@ class WorkerTest(ZulipTestCase):
         stream_to_address = encode_email_address(stream)
         data = [
             dict(
-                message='\xf3test',
+                msg_base64=base64.b64encode(b'\xf3test').decode(),
                 time=time.time(),
-                rcpt_to=stream_to_address
-            )
+                rcpt_to=stream_to_address,
+            ),
         ] * 5
         for element in data:
-            fake_client.queue.append(('email_mirror', element))
+            fake_client.enqueue('email_mirror', element)
 
-        with simulated_queue_client(lambda: fake_client):
+        with simulated_queue_client(lambda: fake_client), \
+                self.assertLogs('zerver.worker.queue_processors', level='WARNING') as warn_logs:
             start_time = time.time()
             with patch('time.time', return_value=start_time):
                 worker = queue_processors.MirrorWorker()
@@ -386,7 +334,7 @@ class WorkerTest(ZulipTestCase):
                 self.assertEqual(mock_mirror_email.call_count, 2)
 
                 # If a new message is sent into the stream mirror, it will get rejected:
-                fake_client.queue.append(('email_mirror', data[0]))
+                fake_client.enqueue('email_mirror', data[0])
                 worker.start()
                 self.assertEqual(mock_mirror_email.call_count, 2)
 
@@ -394,29 +342,33 @@ class WorkerTest(ZulipTestCase):
                 with self.settings(EMAIL_GATEWAY_PATTERN="%s@example.com"):
                     address = 'mm' + ('x' * 32) + '@example.com'
                     event = dict(
-                        message='\xf3test',
+                        msg_base64=base64.b64encode(b'\xf3test').decode(),
                         time=time.time(),
-                        rcpt_to=address
+                        rcpt_to=address,
                     )
-                    fake_client.queue.append(('email_mirror', event))
+                    fake_client.enqueue('email_mirror', event)
                     worker.start()
                     self.assertEqual(mock_mirror_email.call_count, 3)
 
             # After some times passes, emails get accepted again:
             with patch('time.time', return_value=(start_time + 11.0)):
-                fake_client.queue.append(('email_mirror', data[0]))
+                fake_client.enqueue('email_mirror', data[0])
                 worker.start()
                 self.assertEqual(mock_mirror_email.call_count, 4)
 
                 # If RateLimiterLockingException is thrown, we rate-limit the new message:
                 with patch('zerver.lib.rate_limiter.RedisRateLimiterBackend.incr_ratelimit',
                            side_effect=RateLimiterLockingException):
-                    fake_client.queue.append(('email_mirror', data[0]))
+                    fake_client.enqueue('email_mirror', data[0])
                     worker.start()
                     self.assertEqual(mock_mirror_email.call_count, 4)
-                    expected_warn = "Deadlock trying to incr_ratelimit for RateLimitedRealmMirror:%s" % (
-                        realm.string_id,)
-                    mock_warn.assert_called_with(expected_warn)
+                    mock_warn.assert_called_with(
+                        "Deadlock trying to incr_ratelimit for %s",
+                        f"RateLimitedRealmMirror:{realm.string_id}",
+                    )
+        self.assertEqual(warn_logs.output, [
+            'WARNING:zerver.worker.queue_processors:MirrorWorker: Rejecting an email from: None to realm: Zulip Dev - rate limited.'
+        ] * 5)
 
     def test_email_sending_worker_retries(self) -> None:
         """Tests the retry_send_email_failures decorator to make sure it
@@ -428,22 +380,22 @@ class WorkerTest(ZulipTestCase):
             'to_emails': [self.example_email("hamlet")],
             'from_name': 'Zulip Account Security',
             'from_address': FromAddress.NOREPLY,
-            'context': {}
+            'context': {},
         }
-        fake_client.queue.append(('email_senders', data))
+        fake_client.enqueue('email_senders', data)
 
         def fake_publish(queue_name: str,
                          event: Dict[str, Any],
-                         processor: Callable[[Any], None]) -> None:
-            fake_client.queue.append((queue_name, event))
+                         processor: Optional[Callable[[Any], None]]) -> None:
+            fake_client.enqueue(queue_name, event)
 
         with simulated_queue_client(lambda: fake_client):
             worker = queue_processors.EmailSendingWorker()
             worker.setup()
             with patch('zerver.lib.send_email.build_email',
                        side_effect=smtplib.SMTPServerDisconnected), \
-                    patch('zerver.lib.queue.queue_json_publish',
-                          side_effect=fake_publish), \
+                    mock_queue_publish('zerver.lib.queue.queue_json_publish',
+                                       side_effect=fake_publish), \
                     patch('logging.exception'):
                 worker.start()
 
@@ -455,21 +407,21 @@ class WorkerTest(ZulipTestCase):
 
         user_id = self.example_user('hamlet').id
         data = {'user_id': user_id, 'id': 'test_missed'}
-        fake_client.queue.append(('signups', data))
+        fake_client.enqueue('signups', data)
 
-        def fake_publish(queue_name: str, event: Dict[str, Any], processor: Callable[[Any], None]) -> None:
-            fake_client.queue.append((queue_name, event))
+        def fake_publish(queue_name: str, event: Dict[str, Any], processor: Optional[Callable[[Any], None]]) -> None:
+            fake_client.enqueue(queue_name, event)
 
         fake_response = MagicMock()
         fake_response.status_code = 400
-        fake_response.text = ujson.dumps({'title': ''})
+        fake_response.content = orjson.dumps({'title': ''})
         with simulated_queue_client(lambda: fake_client):
             worker = queue_processors.SignupWorker()
             worker.setup()
             with patch('zerver.worker.queue_processors.requests.post',
                        return_value=fake_response), \
-                    patch('zerver.lib.queue.queue_json_publish',
-                          side_effect=fake_publish), \
+                    mock_queue_publish('zerver.lib.queue.queue_json_publish',
+                                       side_effect=fake_publish), \
                     patch('logging.info'), \
                     self.settings(MAILCHIMP_API_KEY='one-two',
                                   PRODUCTION=True,
@@ -485,11 +437,11 @@ class WorkerTest(ZulipTestCase):
         data = {'user_id': user_id,
                 'id': 'test_missed',
                 'email_address': 'foo@bar.baz'}
-        fake_client.queue.append(('signups', data))
+        fake_client.enqueue('signups', data)
 
         fake_response = MagicMock()
         fake_response.status_code = 400
-        fake_response.text = ujson.dumps({'title': 'Member Exists'})
+        fake_response.content = orjson.dumps({'title': 'Member Exists'})
         with simulated_queue_client(lambda: fake_client):
             worker = queue_processors.SignupWorker()
             worker.setup()
@@ -497,22 +449,28 @@ class WorkerTest(ZulipTestCase):
                        return_value=fake_response), \
                     self.settings(MAILCHIMP_API_KEY='one-two',
                                   PRODUCTION=True,
-                                  ZULIP_FRIENDS_LIST_ID='id'):
+                                  ZULIP_FRIENDS_LIST_ID='id'), \
+                    self.assertLogs(level='INFO') as info_logs:
                 with patch('logging.warning') as logging_warning_mock:
                     worker.start()
                     logging_warning_mock.assert_called_once_with(
-                        "Attempted to sign up already existing email to list: foo@bar.baz")
+                        "Attempted to sign up already existing email to list: %s",
+                        "foo@bar.baz",
+                    )
+            self.assertEqual(info_logs.output, [
+                'INFO:root:Processing signup for user 10 in realm zulip'
+            ])
 
     def test_signups_bad_request(self) -> None:
         fake_client = self.FakeClient()
 
         user_id = self.example_user('hamlet').id
         data = {'user_id': user_id, 'id': 'test_missed'}
-        fake_client.queue.append(('signups', data))
+        fake_client.enqueue('signups', data)
 
         fake_response = MagicMock()
         fake_response.status_code = 444  # Any non-400 bad request code.
-        fake_response.text = ujson.dumps({'title': 'Member Exists'})
+        fake_response.content = orjson.dumps({'title': 'Member Exists'})
         with simulated_queue_client(lambda: fake_client):
             worker = queue_processors.SignupWorker()
             worker.setup()
@@ -520,9 +478,13 @@ class WorkerTest(ZulipTestCase):
                        return_value=fake_response), \
                     self.settings(MAILCHIMP_API_KEY='one-two',
                                   PRODUCTION=True,
-                                  ZULIP_FRIENDS_LIST_ID='id'):
+                                  ZULIP_FRIENDS_LIST_ID='id'), \
+                    self.assertLogs(level='INFO') as info_logs:
                 worker.start()
                 fake_response.raise_for_status.assert_called_once()
+            self.assertEqual(info_logs.output, [
+                'INFO:root:Processing signup for user 10 in realm zulip'
+            ])
 
     def test_invites_worker(self) -> None:
         fake_client = self.FakeClient()
@@ -531,7 +493,7 @@ class WorkerTest(ZulipTestCase):
             email=self.nonreg_email('alice'), referred_by=inviter, realm=inviter.realm)
         PreregistrationUser.objects.create(
             email=self.nonreg_email('bob'), referred_by=inviter, realm=inviter.realm)
-        data = [
+        data: List[Dict[str, Any]] = [
             dict(prereg_id=prereg_alice.id, referrer_id=inviter.id, email_body=None),
             # Nonexistent prereg_id, as if the invitation was deleted
             dict(prereg_id=-1, referrer_id=inviter.id, email_body=None),
@@ -539,7 +501,7 @@ class WorkerTest(ZulipTestCase):
             dict(email=self.nonreg_email('bob'), referrer_id=inviter.id, email_body=None),
         ]
         for element in data:
-            fake_client.queue.append(('invites', element))
+            fake_client.enqueue('invites', element)
 
         with simulated_queue_client(lambda: fake_client):
             worker = queue_processors.ConfirmationEmailWorker()
@@ -563,7 +525,7 @@ class WorkerTest(ZulipTestCase):
 
         fake_client = self.FakeClient()
         for msg in ['good', 'fine', 'unexpected behaviour', 'back to normal']:
-            fake_client.queue.append(('unreliable_worker', {'type': msg}))
+            fake_client.enqueue('unreliable_worker', {'type': msg})
 
         fn = os.path.join(settings.QUEUE_ERROR_DIR, 'unreliable_worker.errors')
         try:
@@ -577,17 +539,20 @@ class WorkerTest(ZulipTestCase):
             with patch('logging.exception') as logging_exception_mock:
                 worker.start()
                 logging_exception_mock.assert_called_once_with(
-                    "Problem handling data on queue unreliable_worker")
+                    "Problem handling data on queue %s", "unreliable_worker",
+                    stack_info=True,
+                )
 
         self.assertEqual(processed, ['good', 'fine', 'back to normal'])
         with open(fn) as f:
             line = f.readline().strip()
-        events = ujson.loads(line.split('\t')[1])
+        events = orjson.loads(line.split('\t')[1])
         self.assert_length(events, 1)
         event = events[0]
         self.assertEqual(event["type"], 'unexpected behaviour')
 
         processed = []
+
         @queue_processors.assign_queue('unreliable_loopworker')
         class UnreliableLoopWorker(queue_processors.LoopQueueProcessingWorker):
             def consume_batch(self, events: List[Dict[str, Any]]) -> None:
@@ -597,7 +562,7 @@ class WorkerTest(ZulipTestCase):
                     processed.append(event["type"])
 
         for msg in ['good', 'fine', 'unexpected behaviour', 'back to normal']:
-            fake_client.queue.append(('unreliable_loopworker', {'type': msg}))
+            fake_client.enqueue('unreliable_loopworker', {'type': msg})
 
         fn = os.path.join(settings.QUEUE_ERROR_DIR, 'unreliable_loopworker.errors')
         try:
@@ -605,25 +570,65 @@ class WorkerTest(ZulipTestCase):
         except OSError:  # nocoverage # error handling for the directory not existing
             pass
 
-        with loopworker_sleep_mock, simulated_queue_client(lambda: fake_client):
+        with simulated_queue_client(lambda: fake_client):
             loopworker = UnreliableLoopWorker()
             loopworker.setup()
             with patch('logging.exception') as logging_exception_mock:
-                try:
-                    loopworker.start()
-                except AbortLoop:
-                    pass
+                loopworker.start()
                 logging_exception_mock.assert_called_once_with(
-                    "Problem handling data on queue unreliable_loopworker")
+                    "Problem handling data on queue %s", "unreliable_loopworker",
+                    stack_info=True,
+                )
 
         self.assertEqual(processed, ['good', 'fine'])
         with open(fn) as f:
             line = f.readline().strip()
-        events = ujson.loads(line.split('\t')[1])
+        events = orjson.loads(line.split('\t')[1])
         self.assert_length(events, 4)
 
         self.assertEqual([event["type"] for event in events],
                          ['good', 'fine', 'unexpected behaviour', 'back to normal'])
+
+    def test_timeouts(self) -> None:
+        processed = []
+
+        @queue_processors.assign_queue('timeout_worker')
+        class TimeoutWorker(queue_processors.QueueProcessingWorker):
+            MAX_CONSUME_SECONDS = 1
+
+            def consume(self, data: Mapping[str, Any]) -> None:
+                if data["type"] == 'timeout':
+                    time.sleep(5)
+                processed.append(data["type"])
+
+        fake_client = self.FakeClient()
+        for msg in ['good', 'fine', 'timeout', 'back to normal']:
+            fake_client.enqueue('timeout_worker', {'type': msg})
+
+        fn = os.path.join(settings.QUEUE_ERROR_DIR, 'timeout_worker.errors')
+        try:
+            os.remove(fn)
+        except OSError:  # nocoverage # error handling for the directory not existing
+            pass
+
+        with simulated_queue_client(lambda: fake_client):
+            worker = TimeoutWorker()
+            worker.setup()
+            worker.ENABLE_TIMEOUTS = True
+            with patch('logging.exception') as logging_exception_mock:
+                worker.start()
+                logging_exception_mock.assert_called_once_with(
+                    "%s in queue %s", str(WorkerTimeoutException(1, 1)), "timeout_worker",
+                    stack_info=True,
+                )
+
+        self.assertEqual(processed, ['good', 'fine', 'back to normal'])
+        with open(fn) as f:
+            line = f.readline().strip()
+        events = orjson.loads(line.split('\t')[1])
+        self.assert_length(events, 1)
+        event = events[0]
+        self.assertEqual(event["type"], 'timeout')
 
     def test_worker_noname(self) -> None:
         class TestWorker(queue_processors.QueueProcessingWorker):
@@ -636,8 +641,10 @@ class WorkerTest(ZulipTestCase):
             TestWorker()
 
     def test_get_active_worker_queues(self) -> None:
+        test_queue_count = len(get_active_worker_queues(queue_type='test'))
+        self.assertEqual(3, test_queue_count)
+
         worker_queue_count = (len(QueueProcessingWorker.__subclasses__()) +
                               len(EmailSendingWorker.__subclasses__()) +
                               len(LoopQueueProcessingWorker.__subclasses__()) - 1)
         self.assertEqual(worker_queue_count, len(get_active_worker_queues()))
-        self.assertEqual(1, len(get_active_worker_queues(queue_type='test')))

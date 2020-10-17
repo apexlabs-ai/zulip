@@ -1,32 +1,49 @@
+# Zulip's OpenAPI-based API documentation system is documented at
+#   https://zulip.readthedocs.io/en/latest/documentation/api.html
+#
+# This file contains the top-level logic for testing the cURL examples
+# in Zulip's API documentation; the details are in
+# zerver.openapi.curl_param_value_generators.
+
 import glob
+import html
 import json
 import shlex
 import subprocess
-import markdown
-import html
 
+import markdown
 from zulip import Client
-from zerver.lib.bugdown import api_code_examples
+
 from zerver.models import get_realm
-from zerver.openapi.curl_param_value_generators import REGISTERED_GENERATOR_FUNCTIONS, CALLED_GENERATOR_FUNCTIONS
+from zerver.openapi import markdown_extension
+from zerver.openapi.curl_param_value_generators import (
+    CALLED_GENERATOR_FUNCTIONS,
+    REGISTERED_GENERATOR_FUNCTIONS,
+)
+
 
 def test_generated_curl_examples_for_success(client: Client) -> None:
-    authentication_line = "{}:{}".format(client.email, client.api_key)
-    # A limited markdown engine that just processes the code example syntax.
+    authentication_line = f"{client.email}:{client.api_key}"
+    # A limited Markdown engine that just processes the code example syntax.
     realm = get_realm("zulip")
-    md_engine = markdown.Markdown(extensions=[api_code_examples.makeExtension(
+    md_engine = markdown.Markdown(extensions=[markdown_extension.makeExtension(
         api_url=realm.uri + "/api")])
 
-    for file_name in glob.glob("templates/zerver/api/*.md"):
+    # We run our curl tests in alphabetical order (except that we
+    # delay the deactivate-user test to the very end), since we depend
+    # on "add" tests coming before "remove" tests in some cases.  We
+    # should try to either avoid ordering dependencies or make them
+    # very explicit.
+    for file_name in sorted(glob.glob("templates/zerver/api/*.md")):
         documentation_lines = open(file_name).readlines()
         for line in documentation_lines:
-            # A typical example from the markdown source looks like this:
+            # A typical example from the Markdown source looks like this:
             #     {generate_code_example(curl, ...}
             if not line.startswith("{generate_code_example(curl"):
                 continue
             # To do an end-to-end test on the documentation examples
             # that will be actually shown to users, we use the
-            # markdown rendering pipeline to compute the user-facing
+            # Markdown rendering pipeline to compute the user-facing
             # example, and then run that to test it.
             curl_command_html = md_engine.convert(line.strip())
             unescaped_html = html.unescape(curl_command_html)
@@ -35,7 +52,7 @@ def test_generated_curl_examples_for_success(client: Client) -> None:
             curl_command_text = curl_command_text.replace(
                 "BOT_EMAIL_ADDRESS:BOT_API_KEY", authentication_line)
 
-            print("Testing %s ..." % (curl_command_text.split("\n")[0],))
+            print("Testing {} ...".format(curl_command_text.split("\n")[0]))
 
             # Turn the text into an arguments list.
             generated_curl_command = [

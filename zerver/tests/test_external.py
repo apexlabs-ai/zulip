@@ -1,28 +1,22 @@
+import time
+from unittest import mock
+
+import DNS
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 
 from zerver.forms import email_is_not_mit_mailing_list
-
 from zerver.lib.rate_limiter import (
-    add_ratelimit_rule,
-    remove_ratelimit_rule,
     RateLimitedUser,
     RateLimiterLockingException,
+    add_ratelimit_rule,
+    remove_ratelimit_rule,
 )
+from zerver.lib.test_classes import ZulipTestCase
 from zerver.lib.zephyr import compute_mit_user_fullname
+from zerver.models import UserProfile
 
-from zerver.lib.test_classes import (
-    ZulipTestCase,
-)
-
-from zerver.models import (
-    UserProfile,
-)
-
-import DNS
-import mock
-import time
 
 class MITNameTest(ZulipTestCase):
     def test_valid_hesiod(self) -> None:
@@ -51,6 +45,19 @@ class RateLimitTests(ZulipTestCase):
 
     def setUp(self) -> None:
         super().setUp()
+
+        # Some tests here can be somewhat timing-sensitive in a way
+        # that can't be eliminated, e.g. due to testing things that rely
+        # on redis' internal timing mechanism which we can't mock.
+        # The first API request when running a suite of tests is slow
+        # and can take multiple seconds. This is not a problem when running
+        # multiple tests, but if an individual, time-sensitive test from this class
+        # is run, the first API request it makes taking a lot of time can throw things off
+        # and cause the test to fail. Thus we do a dummy API request here to warm up
+        # the system and allow the tests to assume their requests won't take multiple seconds.
+        user = self.example_user('hamlet')
+        self.api_get(user, "/api/v1/messages")
+
         settings.RATE_LIMITING = True
         add_ratelimit_rule(1, 5)
 
@@ -93,7 +100,7 @@ class RateLimitTests(ZulipTestCase):
         start_time = time.time()
         for i in range(6):
             with mock.patch('time.time', return_value=(start_time + i * 0.1)):
-                result = self.send_api_message(user, "some stuff %s" % (i,))
+                result = self.send_api_message(user, f"some stuff {i}")
 
         self.assertEqual(result.status_code, 429)
         json = result.json()
@@ -111,14 +118,17 @@ class RateLimitTests(ZulipTestCase):
 
             self.assert_json_success(result)
 
-    @mock.patch('zerver.lib.rate_limiter.logger.warning')
-    def test_hit_ratelimiterlockingexception(self, mock_warn: mock.MagicMock) -> None:
+    def test_hit_ratelimiterlockingexception(self) -> None:
         user = self.example_user('cordelia')
         RateLimitedUser(user).clear_history()
 
         with mock.patch('zerver.lib.rate_limiter.RedisRateLimiterBackend.incr_ratelimit',
                         side_effect=RateLimiterLockingException):
-            result = self.send_api_message(user, "some stuff")
-            self.assertEqual(result.status_code, 429)
-            mock_warn.assert_called_with("Deadlock trying to incr_ratelimit for RateLimitedUser:%s:api_by_user"
-                                         % (user.id,))
+            with self.assertLogs("zerver.lib.rate_limiter", level="WARNING") as m:
+                result = self.send_api_message(user, "some stuff")
+                self.assertEqual(result.status_code, 429)
+            self.assertEqual(
+                m.output,
+                ["WARNING:zerver.lib.rate_limiter:Deadlock trying to incr_ratelimit for {}".format(
+                    f"RateLimitedUser:{user.id}:api_by_user")]
+            )

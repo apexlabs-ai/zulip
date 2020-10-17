@@ -5,20 +5,23 @@
 # Django itself
 Django==2.2.*
 
-# needed for Deque (in Python < 3.5.4) and TypedDict
+# needed for Literal, TypedDict
 typing-extensions
+
+# Backport of @dataclass
+dataclasses;python_version<"3.7"
 
 # Needed for rendering backend templates
 Jinja2
 
-# Needed for markdown processing
+# Needed for Markdown processing
 Markdown
+importlib-metadata;python_version<"3.8"  # for Markdown
 Pygments
-hyperlink
+jsx-lexer
 
 # Needed for manage.py
-# Upgrade blocked because ipython dropped Python 3.5 support.
-ipython==7.9.*
+ipython
 
 # Needed for Image Processing
 Pillow
@@ -30,7 +33,7 @@ SQLAlchemy
 argon2-cffi
 
 # Needed for S3 file uploads
-boto
+boto3
 
 # Needed for integrations
 defusedxml
@@ -65,11 +68,8 @@ premailer
 # Needed for JWT-based auth
 PyJWT
 
-# Needed for including other markdown files for user docs
+# Needed for including other Markdown files for user docs
 markdown-include
-
-# Needed for mock objects in decorators
-mock
 
 # Needed to access rabbitmq
 pika
@@ -78,10 +78,10 @@ pika
 psycopg2 --no-binary psycopg2
 
 # Needed for memcached usage
-pylibmc
+python-binary-memcached
 
-# Needed for compression support in memcached via pylibmc
-django-pylibmc
+# Needed for compression support in memcached via python-binary-memcached
+django-bmemcached
 
 # Needed for zerver/tests/test_timestamp.py
 python-dateutil
@@ -92,9 +92,6 @@ pytz
 # Needed for redis
 redis
 
-# Needed for Python 2+3 compatibility
-six
-
 # Needed to parse source maps for error reporting
 sourcemap
 
@@ -102,9 +99,7 @@ sourcemap
 tornado==4.*  # https://github.com/zulip/zulip/issues/8913
 
 # Fast JSON parser
-# Forked for an issue related to unpaired Unicode surrogates:
-# https://github.com/zulip/zulip/issues/6332, https://github.com/esnme/ultrajson/pull/284
-https://github.com/zulip/ultrajson/archive/70ac02becc3e11174cd5072650f885b30daab8a8.zip#egg=ujson==1.35+git
+orjson
 
 # Django extension for serving webpack modules
 django-webpack4-loader
@@ -135,15 +130,18 @@ python-magic
 # the version from Git rather than a PyPI release. Keeping everything in
 # one repository simplifies the process of implementing and documenting
 # new bots for new contributors.
-https://github.com/zulip/python-zulip-api/archive/0.6.4.zip/#egg=zulip==0.6.4_git&subdirectory=zulip
-https://github.com/zulip/python-zulip-api/archive/0.6.4.zip/#egg=zulip_bots==0.6.4+git&subdirectory=zulip_bots
+https://github.com/zulip/python-zulip-api/archive/0.7.0.zip/#egg=zulip==0.7.0_git&subdirectory=zulip
+https://github.com/zulip/python-zulip-api/archive/0.7.0.zip/#egg=zulip_bots==0.7.0+git&subdirectory=zulip_bots
 
 # Used for Hesiod lookups, etc.
 py3dns
 
 # Install Python Social Auth
 social-auth-app-django
-social-auth-core[azuread,saml]
+https://github.com/python-social-auth/social-core/archive/3.4.0.zip/#egg=social-auth-core[azuread,saml]==3.4.0
+
+# For encrypting a login token to the desktop app
+cryptography
 
 # Needed for messages' rendered content parsing in push notifications.
 lxml
@@ -163,12 +161,11 @@ django-sendfile2
 disposable-email-domains
 
 # Needed for parsing YAML with JSON references from the REST API spec files
-yamole
+jsonref
 
 # Needed for signing thumbnail requests so that they can be authenticated on the
-# other end.  Using a fork to eliminate a really slow pkgresources import:
-# https://github.com/thumbor/libthumbor/pull/37
-https://github.com/zulip/libthumbor/archive/60ed2431c07686a12f2770b2d852c5650f3ccfc6.zip#egg=libthumbor==1.3.2zulip
+# other end.
+libthumbor
 
 # Needed for string matching in AlertWordProcessor
 pyahocorasick
@@ -177,8 +174,18 @@ pyahocorasick
 # Used for rate limiting authentication.
 decorator
 
-# Use SameSite cookies in legacy Django (remove with Django 2.1)
-django-cookies-samesite
-
 # For server-side enforcement of password strength
 zxcvbn
+
+# Needed for sending HTTP requests
+requests[security]
+requests-oauthlib
+
+# For OpenAPI schema validation.
+openapi-core
+
+# For reporting errors to sentry.io
+sentry-sdk
+
+# For detecting URLs to link
+tlds

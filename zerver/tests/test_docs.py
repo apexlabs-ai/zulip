@@ -1,22 +1,21 @@
 import os
-import ujson
-import mock
+from typing import Any, Dict, Sequence
+from unittest import mock, skipUnless
 from urllib.parse import urlsplit
 
+import orjson
 from django.conf import settings
-from django.test import TestCase, override_settings
 from django.http import HttpResponse
-from typing import Any, Dict, List
+from django.test import override_settings
 
+from corporate.models import Customer
 from zerver.lib.integrations import INTEGRATIONS
 from zerver.lib.test_classes import ZulipTestCase
 from zerver.lib.test_helpers import HostRequestMock
-from zerver.lib.test_runner import slow
 from zerver.lib.utils import split_by
 from zerver.models import Realm, get_realm
-from zerver.views.documentation import (
-    add_api_uri_context,
-)
+from zerver.views.documentation import add_api_uri_context
+
 
 class DocPageTest(ZulipTestCase):
     def get_doc(self, url: str, subdomain: str) -> HttpResponse:
@@ -29,14 +28,14 @@ class DocPageTest(ZulipTestCase):
             return
         print("Error processing URL:", url)
         if response.get('Content-Type') == 'application/json':
-            content = ujson.loads(response.content)
+            content = orjson.loads(response.content)
             print()
             print("======================================================================")
             print("ERROR: {}".format(content.get('msg')))
             print()
 
-    def _test(self, url: str, expected_content: str, extra_strings: List[str]=[],
-              landing_missing_strings: List[str]=[], landing_page: bool=True,
+    def _test(self, url: str, expected_content: str, extra_strings: Sequence[str]=[],
+              landing_missing_strings: Sequence[str]=[], landing_page: bool=True,
               doc_html_str: bool=False) -> None:
 
         # Test the URL on the "zephyr" subdomain
@@ -76,7 +75,8 @@ class DocPageTest(ZulipTestCase):
             for s in landing_missing_strings:
                 self.assertNotIn(s, str(result.content))
             if not doc_html_str:
-                self.assert_in_success_response(['<meta name="description" content="Zulip combines'], result)
+                # Every page has a meta-description
+                self.assert_in_success_response(['<meta name="description" content="'], result)
             self.assert_not_in_success_response(['<meta name="robots" content="noindex,nofollow">'], result)
 
             # Test the URL on the "zephyr" subdomain with the landing page setting
@@ -90,7 +90,6 @@ class DocPageTest(ZulipTestCase):
             if not doc_html_str:
                 self.assert_in_success_response(['<meta name="robots" content="noindex,nofollow">'], result)
 
-    @slow("Tests dozens of endpoints")
     def test_api_doc_endpoints(self) -> None:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         api_docs_dir = os.path.join(current_dir, '..', '..', 'templates/zerver/api/')
@@ -103,40 +102,41 @@ class DocPageTest(ZulipTestCase):
         files = list(filter(_filter_func, files))
 
         for f in files:
-            endpoint = '/api/{}'.format(os.path.splitext(f)[0])
+            endpoint = f'/api/{os.path.splitext(f)[0]}'
             self._test(endpoint, '', doc_html_str=True)
 
-    @slow("Tests dozens of endpoints, including generating lots of emails")
     def test_doc_endpoints(self) -> None:
         self._test('/api/', 'The Zulip API')
         self._test('/api/api-keys', 'be careful with it')
         self._test('/api/installation-instructions', 'No download required!')
         self._test('/api/send-message', 'steal away your hearts')
         self._test('/api/render-message', '**foo**')
-        self._test('/api/get-all-streams', 'include_public')
-        self._test('/api/get-stream-id', 'The name of the stream.')
-        self._test('/api/get-subscribed-streams', 'Get all streams that the user is subscribed to.')
-        self._test('/api/get-all-users', 'client_gravatar')
+        self._test('/api/get-streams', 'include_public')
+        self._test('/api/get-stream-id', 'The name of the stream to access.')
+        self._test('/api/get-subscriptions', 'Get all streams that the user is subscribed to.')
+        self._test('/api/get-users', 'client_gravatar')
         self._test('/api/register-queue', 'apply_markdown')
-        self._test('/api/get-events-from-queue', 'dont_block')
+        self._test('/api/get-events', 'dont_block')
         self._test('/api/delete-queue', 'Delete a previously registered queue')
         self._test('/api/update-message', 'propagate_mode')
-        self._test('/api/get-profile', 'takes no arguments')
-        self._test('/api/add-subscriptions', 'authorization_errors_fatal')
+        self._test('/api/get-own-user', 'takes no parameters')
+        self._test('/api/subscribe', 'authorization_errors_fatal')
         self._test('/api/create-user', 'zuliprc-admin')
-        self._test('/api/remove-subscriptions', 'not_removed')
-        self._test('/team/', 'industry veterans')
+        self._test('/api/unsubscribe', 'not_removed')
+        if settings.ZILENCER_ENABLED:
+            self._test('/team/', 'industry veterans')
         self._test('/history/', 'Cambridge, Massachusetts')
         # Test the i18n version of one of these pages.
         self._test('/en/history/', 'Cambridge, Massachusetts')
-        self._test('/apps/', 'Apps for every platform.')
+        if settings.ZILENCER_ENABLED:
+            self._test('/apps/', 'Apps for every platform.')
         self._test('/features/', 'Beautiful messaging')
         self._test('/hello/', 'Chat for distributed teams', landing_missing_strings=["Login"])
         self._test('/why-zulip/', 'Why Zulip?')
         self._test('/for/open-source/', 'for open source projects')
+        self._test('/for/research/', 'for researchers')
         self._test('/for/companies/', 'in a company')
         self._test('/for/working-groups-and-communities/', 'standards bodies')
-        self._test('/for/mystery-hunt/', 'four SIPB alums')
         self._test('/security/', 'TLS encryption')
         self._test('/atlassian/', 'HipChat')
         self._test('/devlogin/', 'Normal users', landing_page=False)
@@ -168,7 +168,6 @@ class DocPageTest(ZulipTestCase):
         self._test(url, title, doc_html_str=True)
         self._test(url, description, doc_html_str=True)
 
-    @slow("Tests dozens of endpoints, including all our integrations docs")
     def test_integration_doc_endpoints(self) -> None:
         self._test('/integrations/',
                    'native integrations.',
@@ -176,11 +175,11 @@ class DocPageTest(ZulipTestCase):
                        'And hundreds more through',
                        'Hubot',
                        'Zapier',
-                       'IFTTT'
+                       'IFTTT',
                    ])
 
         for integration in INTEGRATIONS.keys():
-            url = '/integrations/doc-html/{}'.format(integration)
+            url = f'/integrations/doc-html/{integration}'
             self._test(url, '', doc_html_str=True)
 
     def test_integration_pages_open_graph_metadata(self) -> None:
@@ -208,13 +207,13 @@ class DocPageTest(ZulipTestCase):
         # We don't need to test all the pages for 404
         for integration in list(INTEGRATIONS.keys())[5]:
             with self.settings(ROOT_DOMAIN_LANDING_PAGE=True):
-                url = '/en/integrations/doc-html/{}'.format(integration)
+                url = f'/en/integrations/doc-html/{integration}'
                 result = self.client_get(url, subdomain="", follow=True)
                 self.assertEqual(result.status_code, 404)
                 result = self.client_get(url, subdomain="zephyr", follow=True)
                 self.assertEqual(result.status_code, 404)
 
-            url = '/en/integrations/doc-html/{}'.format(integration)
+            url = f'/en/integrations/doc-html/{integration}'
             result = self.client_get(url, subdomain="", follow=True)
             self.assertEqual(result.status_code, 404)
             result = self.client_get(url, subdomain="zephyr", follow=True)
@@ -268,14 +267,14 @@ class HelpTest(ZulipTestCase):
         self.assertIn('<strong>Manage streams</strong>', str(result.content))
         self.assertNotIn('/#streams', str(result.content))
 
-class IntegrationTest(TestCase):
+class IntegrationTest(ZulipTestCase):
     def test_check_if_every_integration_has_logo_that_exists(self) -> None:
         for integration in INTEGRATIONS.values():
             path = urlsplit(integration.logo_url).path
             self.assertTrue(os.path.isfile(settings.DEPLOY_ROOT + path), integration.name)
 
     def test_api_url_view_subdomains_base(self) -> None:
-        context = dict()  # type: Dict[str, Any]
+        context: Dict[str, Any] = {}
         add_api_uri_context(context, HostRequestMock())
         self.assertEqual(context["api_url_scheme_relative"], "testserver/api")
         self.assertEqual(context["api_url"], "http://testserver/api")
@@ -283,14 +282,14 @@ class IntegrationTest(TestCase):
 
     @override_settings(ROOT_DOMAIN_LANDING_PAGE=True)
     def test_api_url_view_subdomains_homepage_base(self) -> None:
-        context = dict()  # type: Dict[str, Any]
+        context: Dict[str, Any] = {}
         add_api_uri_context(context, HostRequestMock())
         self.assertEqual(context["api_url_scheme_relative"], "yourZulipDomain.testserver/api")
         self.assertEqual(context["api_url"], "http://yourZulipDomain.testserver/api")
         self.assertFalse(context["html_settings_links"])
 
     def test_api_url_view_subdomains_full(self) -> None:
-        context = dict()  # type: Dict[str, Any]
+        context: Dict[str, Any] = {}
         request = HostRequestMock(host="mysubdomain.testserver")
         add_api_uri_context(context, request)
         self.assertEqual(context["api_url_scheme_relative"], "mysubdomain.testserver/api")
@@ -298,7 +297,7 @@ class IntegrationTest(TestCase):
         self.assertTrue(context["html_settings_links"])
 
     def test_html_settings_links(self) -> None:
-        context = dict()  # type: Dict[str, Any]
+        context: Dict[str, Any] = {}
         with self.settings(ROOT_DOMAIN_LANDING_PAGE=True):
             add_api_uri_context(context, HostRequestMock())
         self.assertEqual(
@@ -308,7 +307,7 @@ class IntegrationTest(TestCase):
             context['subscriptions_html'],
             'streams page')
 
-        context = dict()
+        context = {}
         with self.settings(ROOT_DOMAIN_LANDING_PAGE=True):
             add_api_uri_context(context, HostRequestMock(host="mysubdomain.testserver"))
         self.assertEqual(
@@ -318,7 +317,7 @@ class IntegrationTest(TestCase):
             context['subscriptions_html'],
             '<a target="_blank" href="/#streams">streams page</a>')
 
-        context = dict()
+        context = {}
         add_api_uri_context(context, HostRequestMock())
         self.assertEqual(
             context['settings_html'],
@@ -328,6 +327,7 @@ class IntegrationTest(TestCase):
             '<a target="_blank" href="/#streams">streams page</a>')
 
 class AboutPageTest(ZulipTestCase):
+    @skipUnless(settings.ZILENCER_ENABLED, "requires zilencer")
     def test_endpoint(self) -> None:
         with self.settings(CONTRIBUTOR_DATA_FILE_PATH="zerver/tests/fixtures/authors.json"):
             result = self.client_get('/team/')
@@ -339,12 +339,12 @@ class AboutPageTest(ZulipTestCase):
             result = self.client_get('/team/')
             self.assertEqual(result.status_code, 200)
             self.assert_in_success_response(['Never ran'], result)
-            m.called_once()
+            m.assert_called_once()
 
         with self.settings(ZILENCER_ENABLED=False):
             result = self.client_get('/team/')
             self.assertEqual(result.status_code, 301)
-            self.assertEqual(result["Location"], "https://zulipchat.com/team/")
+            self.assertEqual(result["Location"], "https://zulip.com/team/")
 
     def test_split_by(self) -> None:
         """Utility function primarily used in authors page"""
@@ -360,22 +360,29 @@ class SmtpConfigErrorTest(ZulipTestCase):
 
 class PlansPageTest(ZulipTestCase):
     def test_plans_auth(self) -> None:
-        # Test root domain
-        result = self.client_get("/plans/", subdomain="")
+        root_domain = ""
+        result = self.client_get("/plans/", subdomain=root_domain)
         self.assert_in_success_response(["Sign up now"], result)
-        # Test non-existent domain
-        result = self.client_get("/plans/", subdomain="moo")
+
+        non_existent_domain = "moo"
+        result = self.client_get("/plans/", subdomain=non_existent_domain)
         self.assertEqual(result.status_code, 404)
         self.assert_in_response("does not exist", result)
-        # Test valid domain, no login
+
         realm = get_realm("zulip")
         realm.plan_type = Realm.STANDARD_FREE
         realm.save(update_fields=["plan_type"])
         result = self.client_get("/plans/", subdomain="zulip")
         self.assertEqual(result.status_code, 302)
         self.assertEqual(result["Location"], "/accounts/login/?next=plans")
-        # Test valid domain, with login
-        self.login('hamlet')
+
+        guest_user = 'polonius'
+        self.login(guest_user)
+        result = self.client_get("/plans/", subdomain="zulip", follow=True)
+        self.assertEqual(result.status_code, 404)
+
+        organization_member = 'hamlet'
+        self.login(organization_member)
         result = self.client_get("/plans/", subdomain="zulip")
         self.assert_in_success_response(["Current plan"], result)
         # Test root domain, with login on different domain
@@ -388,11 +395,12 @@ class PlansPageTest(ZulipTestCase):
         sign_up_now = "Sign up now"
         buy_standard = "Buy Standard"
         current_plan = "Current plan"
+        sponsorship_pending = "Sponsorship pending"
 
         # Root domain
         result = self.client_get("/plans/", subdomain="")
         self.assert_in_success_response([sign_up_now, buy_standard], result)
-        self.assert_not_in_success_response([current_plan], result)
+        self.assert_not_in_success_response([current_plan, sponsorship_pending], result)
 
         realm = get_realm("zulip")
         realm.plan_type = Realm.SELF_HOSTED
@@ -401,36 +409,44 @@ class PlansPageTest(ZulipTestCase):
         with self.settings(PRODUCTION=True):
             result = self.client_get("/plans/", subdomain="zulip")
             self.assertEqual(result.status_code, 302)
-            self.assertEqual(result["Location"], "https://zulipchat.com/plans")
+            self.assertEqual(result["Location"], "https://zulip.com/plans")
 
             self.login('iago')
 
             # SELF_HOSTED should hide the local plans page, even if logged in
             result = self.client_get("/plans/", subdomain="zulip")
             self.assertEqual(result.status_code, 302)
-            self.assertEqual(result["Location"], "https://zulipchat.com/plans")
+            self.assertEqual(result["Location"], "https://zulip.com/plans")
 
         # But in the development environment, it renders a page
         result = self.client_get("/plans/", subdomain="zulip")
         self.assert_in_success_response([sign_up_now, buy_standard], result)
-        self.assert_not_in_success_response([current_plan], result)
+        self.assert_not_in_success_response([current_plan, sponsorship_pending], result)
 
         realm.plan_type = Realm.LIMITED
         realm.save(update_fields=["plan_type"])
         result = self.client_get("/plans/", subdomain="zulip")
         self.assert_in_success_response([current_plan, buy_standard], result)
-        self.assert_not_in_success_response([sign_up_now], result)
+        self.assert_not_in_success_response([sign_up_now, sponsorship_pending], result)
 
         realm.plan_type = Realm.STANDARD_FREE
         realm.save(update_fields=["plan_type"])
         result = self.client_get("/plans/", subdomain="zulip")
         self.assert_in_success_response([current_plan], result)
-        self.assert_not_in_success_response([sign_up_now, buy_standard], result)
+        self.assert_not_in_success_response([sign_up_now, buy_standard, sponsorship_pending], result)
 
         realm.plan_type = Realm.STANDARD
         realm.save(update_fields=["plan_type"])
         result = self.client_get("/plans/", subdomain="zulip")
         self.assert_in_success_response([current_plan], result)
+        self.assert_not_in_success_response([sign_up_now, buy_standard, sponsorship_pending], result)
+
+        realm.plan_type = Realm.LIMITED
+        realm.save()
+        Customer.objects.create(realm=get_realm("zulip"), stripe_customer_id="cus_id", sponsorship_pending=True)
+        result = self.client_get("/plans/", subdomain="zulip")
+        self.assert_in_success_response([current_plan], result)
+        self.assert_in_success_response([current_plan, sponsorship_pending], result)
         self.assert_not_in_success_response([sign_up_now, buy_standard], result)
 
 class AppsPageTest(ZulipTestCase):
@@ -442,7 +458,12 @@ class AppsPageTest(ZulipTestCase):
         with self.settings(ZILENCER_ENABLED=False):
             result = self.client_get('/apps/')
         self.assertEqual(result.status_code, 301)
-        self.assertTrue(result['Location'] == 'https://zulipchat.com/apps/')
+        self.assertTrue(result['Location'] == 'https://zulip.com/apps/')
+
+        with self.settings(ZILENCER_ENABLED=False):
+            result = self.client_get('/apps/linux')
+        self.assertEqual(result.status_code, 301)
+        self.assertTrue(result['Location'] == 'https://zulip.com/apps/')
 
         with self.settings(ZILENCER_ENABLED=True):
             result = self.client_get('/apps/')
