@@ -563,20 +563,6 @@ class MissedMessageWorker(QueueProcessingWorker):
         self.timer_event.start()
 
     def maybe_send_batched_emails(self) -> None:
-        logging.info('missed work consumer')
-        try:
-            user_profile = get_user_profile_by_id(event['user_profile_id'])
-            aahi_id = int(
-                user_profile.delivery_email.replace('user', '').replace('users.aahi.io', ''))
-            requests.post('https://api.aahi.io/api/v1/chat/notifications/notify_by_id/',
-                          json={
-                              'user': aahi_id,
-                              'message': 'Open chat to see it'
-                          },
-                          timeout=10)
-        except ValueError:
-            pass
-
         with self.lock:
             # self.timer_event just triggered execution of this
             # function in a thread, so now that we hold the lock, we
@@ -586,6 +572,7 @@ class MissedMessageWorker(QueueProcessingWorker):
 
             current_time = time.time()
             for user_profile_id, timestamp in list(self.batch_start_by_recipient.items()):
+
                 if current_time - timestamp < self.BATCH_DURATION:
                     continue
                 events = self.events_by_recipient[user_profile_id]
@@ -601,6 +588,18 @@ class MissedMessageWorker(QueueProcessingWorker):
             # constant CPU usage when there is no work to do.
             if len(self.batch_start_by_recipient) > 0:
                 self.ensure_timer()
+
+
+def handle_missedmessage_aahi(user_profile_id, event):
+    try:
+        user_profile = get_user_profile_by_id(user_profile_id)
+        aahi_id = int(
+            user_profile.delivery_email.replace('@users.aahi.io', '').replace('user', ''))
+        requests.post('https://api.aahi.io/api/v1/chat/notifications/notify_by_id/',
+                      json={'user': aahi_id, 'message': 'Open chat to see it'}, timeout=10)
+    except ValueError:
+        pass
+
 
 @assign_queue('email_senders')
 class EmailSendingWorker(QueueProcessingWorker):
@@ -625,6 +624,7 @@ class PushNotificationsWorker(QueueProcessingWorker):  # nocoverage
         super().start()
 
     def consume(self, event: Dict[str, Any]) -> None:
+
         try:
             if event.get("type", "add") == "remove":
                 message_ids = event.get('message_ids')
@@ -632,6 +632,7 @@ class PushNotificationsWorker(QueueProcessingWorker):  # nocoverage
                     message_ids = [event['message_id']]
                 handle_remove_push_notification(event['user_profile_id'], message_ids)
             else:
+                handle_missedmessage_aahi(event['user_profile_id'], event)
                 handle_push_notification(event['user_profile_id'], event)
         except PushNotificationBouncerRetryLaterError:
             def failure_processor(event: Dict[str, Any]) -> None:
