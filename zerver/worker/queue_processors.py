@@ -595,9 +595,11 @@ def handle_missedmessage_aahi(user_profile_id, event):
         user_profile = get_user_profile_by_id(user_profile_id)
         aahi_id = int(
             user_profile.delivery_email.replace('@users.aahi.io', '').replace('user', ''))
+        logging.info('handling message aahi')
         requests.post('https://api.aahi.io/api/v1/chat/notifications/notify_by_id/',
                       json={'user': aahi_id, 'message': 'Open chat to see it'}, timeout=10)
     except ValueError:
+        logging.info('not an aahi user -- skipping')
         pass
 
 
