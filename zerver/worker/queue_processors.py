@@ -590,17 +590,6 @@ class MissedMessageWorker(QueueProcessingWorker):
                 self.ensure_timer()
 
 
-def handle_missedmessage_aahi(user_profile_id, event):
-    try:
-        user_profile = get_user_profile_by_id(user_profile_id)
-        aahi_id = int(
-            user_profile.delivery_email.replace('@users.aahi.io', '').replace('user', ''))
-        requests.post('https://api.aahi.io/api/v1/chat/notifications/notify_by_id/',
-                      json={'user': aahi_id, 'message': event['message_content']}, timeout=10)
-    except ValueError:
-        pass
-
-
 @assign_queue('email_senders')
 class EmailSendingWorker(QueueProcessingWorker):
     @retry_send_email_failures
@@ -632,7 +621,6 @@ class PushNotificationsWorker(QueueProcessingWorker):  # nocoverage
                     message_ids = [event['message_id']]
                 handle_remove_push_notification(event['user_profile_id'], message_ids)
             else:
-                handle_missedmessage_aahi(event['user_profile_id'], event)
                 handle_push_notification(event['user_profile_id'], event)
         except PushNotificationBouncerRetryLaterError:
             def failure_processor(event: Dict[str, Any]) -> None:

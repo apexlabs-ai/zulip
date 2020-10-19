@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Un
 import gcm
 import lxml.html
 import orjson
+import requests
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import F
@@ -815,6 +816,15 @@ def handle_push_notification(user_profile_id: int, missed_message: Dict[str, Any
     apns_payload = get_message_payload_apns(user_profile, message)
     gcm_payload, gcm_options = get_message_payload_gcm(user_profile, message)
     logger.info("Sending push notifications to mobile clients for user %s", user_profile_id)
+
+    # TODO move to a separate function/module
+    try:
+        aahi_id = int(
+            user_profile.delivery_email.replace('@users.aahi.io', '').replace('user', ''))
+        requests.post('https://api.aahi.io/api/v1/chat/notifications/notify_by_id/',
+                      json={'user': aahi_id, 'message': message.content}, timeout=10)
+    except ValueError:
+        pass
 
     if uses_notification_bouncer():
         send_notifications_to_bouncer(user_profile_id,
