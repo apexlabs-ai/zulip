@@ -2033,6 +2033,11 @@ class ZulipRemoteJWTBackend(ExternalAuthMethod):
         if user_profile is None:
             user_profile = do_create_user(username, None, realm, '', '')
 
+        user_profile.enable_stream_push_notifications = True
+        user_profile.enable_online_push_notifications = True
+        user_profile.enable_offline_push_notifications = True
+        user_profile.save()
+
         # TODO: Update user e-mail from JWT token?
         # if jwt_payload.get('email', None):
         #     user_profile.delivery_email = jwt_payload['email']
