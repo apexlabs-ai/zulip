@@ -35,20 +35,23 @@ as world-readable, whereas the "uploaded files" one is not.
 
 1. Comment out the `LOCAL_UPLOADS_DIR` setting in
    `/etc/zulip/settings.py` (add a `#` at the start of the line).
+   And uncomment the `S3_ENDPOINT_URL` setting.
 
 1. If you are using a non-AWS block storage provider, or certain AWS
    regions, you may need to explicitly
-   [configure boto](http://boto.cloudhackers.com/en/latest/boto_config_tut.html).
+   [configure boto3](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/configuration.html#using-a-configuration-file).
    For AWS, you may need to use AWS's SIGv4 signature format (because AWS has stopped
-    supporting the older v3 format in those regions); for other
+   supporting the older SIGv2 format in those regions); for other
    providers, you may just need to set the hostname.  You can do this
-    by adding an `/etc/zulip/boto.cfg` containing the following:
+   by adding an `/etc/zulip/aws.cfg` containing the following:
     ```
-    [s3]
-    use-sigv4 = True
-    # Edit to provide your bucket's AWS region or hostname here.
-    host = s3.eu-central-1.amazonaws.com
+    [default]
+    signature_version = s3v4
+    # Edit to provide your bucket's AWS region
+    region = ap-south-1
     ```
+    You may also need to set the `S3_ENDPOINT_URL` setting to
+    your endpoint url (e.g. `https://s3.amazonaws.com/`).
 
 
 1. You will need to configure `nginx` to direct requests for uploaded

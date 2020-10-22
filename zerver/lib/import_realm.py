@@ -657,7 +657,7 @@ def import_uploads(realm: Realm, import_dir: Path, processes: int, processing_av
         else:
             bucket_name = settings.S3_AUTH_UPLOADS_BUCKET
         session = boto3.Session(settings.S3_KEY, settings.S3_SECRET_KEY)
-        bucket = session.resource('s3').Bucket(bucket_name)
+        bucket = session.resource('s3', endpoint_url=settings.S3_ENDPOINT_URL).Bucket(bucket_name)
 
     count = 0
     for record in records:

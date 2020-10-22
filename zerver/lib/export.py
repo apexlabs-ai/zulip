@@ -1273,7 +1273,7 @@ def export_files_from_s3(realm: Realm, bucket_name: str, output_dir: Path,
                          processing_avatars: bool=False, processing_emoji: bool=False,
                          processing_realm_icon_and_logo: bool=False) -> None:
     session = boto3.Session(settings.S3_KEY, settings.S3_SECRET_KEY)
-    s3 = session.resource('s3')
+    s3 = session.resource('s3', endpoint_url=settings.S3_ENDPOINT_URL)
     bucket = s3.Bucket(bucket_name)
     records = []
 

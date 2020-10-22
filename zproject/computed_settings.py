@@ -110,14 +110,7 @@ GENERATE_STRIPE_FIXTURES = False
 # This is overridden in test_settings.py for the test suites
 BAN_CONSOLE_OUTPUT = False
 
-# Google Compute Engine has an /etc/boto.cfg that is "nicely
-# configured" to work with GCE's storage service.  However, their
-# configuration is super aggressive broken, in that it means importing
-# boto in a virtualenv that doesn't contain the GCE tools crashes.
-#
-# By using our own path for BOTO_CONFIG, we can cause boto to not
-# process /etc/boto.cfg.
-os.environ['BOTO_CONFIG'] = '/etc/zulip/boto.cfg'
+os.environ['AWS_CONFIG_FILE'] = '/etc/zulip/aws.cfg'
 
 # These are the settings that we will check that the user has filled in for
 # production deployments before starting the app.  It consists of a series
