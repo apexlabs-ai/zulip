@@ -148,8 +148,9 @@ exports.exit_search = function () {
         exports.close_search_bar_and_open_narrow_description();
     } else {
         // for "searching narrows", we redirect
-        window.location.replace(filter.generate_redirect_url());
+        window.location.href = filter.generate_redirect_url();
     }
+    $(".app").trigger("focus");
 };
 
 exports.initialize = function () {

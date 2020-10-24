@@ -172,14 +172,14 @@ def get_chart_data_for_remote_realm(
 
 @require_server_admin
 def stats_for_installation(request: HttpRequest) -> HttpResponse:
-    return render_stats(request, '/installation', 'Installation', True)
+    return render_stats(request, '/installation', 'installation', True)
 
 @require_server_admin
 def stats_for_remote_installation(request: HttpRequest, remote_server_id: int) -> HttpResponse:
     assert settings.ZILENCER_ENABLED
     server = RemoteZulipServer.objects.get(id=remote_server_id)
     return render_stats(request, f'/remote/{server.id}/installation',
-                        f'remote Installation {server.hostname}', True, True)
+                        f'remote installation {server.hostname}', True, True)
 
 @require_server_admin_api
 @has_request_variables
@@ -543,107 +543,71 @@ def realm_summary_table(realm_minutes: Dict[str, float]) -> str:
             realm.string_id,
             realm.date_created,
             realm.plan_type,
-            coalesce(user_counts.dau_count, 0) dau_count,
-            coalesce(wau_counts.wau_count, 0) wau_count,
-            (
+            coalesce(wau_table.value, 0) wau_count,
+            coalesce(dau_table.value, 0) dau_count,
+            coalesce(user_count_table.value, 0) user_profile_count,
+            coalesce(bot_count_table.value, 0) bot_count
+        FROM
+            zerver_realm as realm
+            LEFT OUTER JOIN (
                 SELECT
-                    count(*)
-                FROM zerver_userprofile up
-                WHERE up.realm_id = realm.id
-                AND is_active
-                AND not is_bot
-            ) user_profile_count,
-            (
-                SELECT
-                    count(*)
-                FROM zerver_userprofile up
-                WHERE up.realm_id = realm.id
-                AND is_active
-                AND is_bot
-            ) bot_count
-        FROM zerver_realm realm
-        LEFT OUTER JOIN
-            (
-                SELECT
-                    up.realm_id realm_id,
-                    count(distinct(ua.user_profile_id)) dau_count
-                FROM zerver_useractivity ua
-                JOIN zerver_userprofile up
-                    ON up.id = ua.user_profile_id
+                    value _14day_active_humans,
+                    realm_id
+                from
+                    analytics_realmcount
                 WHERE
-                    up.is_active
-                AND (not up.is_bot)
-                AND
-                    query in (
-                        '/json/send_message',
-                        'send_message_backend',
-                        '/api/v1/send_message',
-                        '/json/update_pointer',
-                        '/json/users/me/pointer',
-                        'update_pointer_backend'
-                    )
-                AND
-                    last_visit > now() - interval '1 day'
-                GROUP BY realm_id
-            ) user_counts
-            ON user_counts.realm_id = realm.id
-        LEFT OUTER JOIN
-            (
+                    property = 'realm_active_humans::day'
+                    AND end_time > now() - interval '25 hours'
+            ) as _14day_active_humans_table ON realm.id = _14day_active_humans_table.realm_id
+            LEFT OUTER JOIN (
                 SELECT
-                    realm_id,
-                    count(*) wau_count
-                FROM (
-                    SELECT
-                        realm.id as realm_id,
-                        up.delivery_email
-                    FROM zerver_useractivity ua
-                    JOIN zerver_userprofile up
-                        ON up.id = ua.user_profile_id
-                    JOIN zerver_realm realm
-                        ON realm.id = up.realm_id
-                    WHERE up.is_active
-                    AND (not up.is_bot)
-                    AND
-                        ua.query in (
-                            '/json/send_message',
-                            'send_message_backend',
-                            '/api/v1/send_message',
-                            '/json/update_pointer',
-                            '/json/users/me/pointer',
-                            'update_pointer_backend'
-                        )
-                    GROUP by realm.id, up.delivery_email
-                    HAVING max(last_visit) > now() - interval '7 day'
-                ) as wau_users
-                GROUP BY realm_id
-            ) wau_counts
-            ON wau_counts.realm_id = realm.id
+                    value,
+                    realm_id
+                from
+                    analytics_realmcount
+                WHERE
+                    property = '7day_actives::day'
+                    AND end_time > now() - interval '25 hours'
+            ) as wau_table ON realm.id = wau_table.realm_id
+            LEFT OUTER JOIN (
+                SELECT
+                    value,
+                    realm_id
+                from
+                    analytics_realmcount
+                WHERE
+                    property = '1day_actives::day'
+                    AND end_time > now() - interval '25 hours'
+            ) as dau_table ON realm.id = dau_table.realm_id
+            LEFT OUTER JOIN (
+                SELECT
+                    value,
+                    realm_id
+                from
+                    analytics_realmcount
+                WHERE
+                    property = 'active_users_audit:is_bot:day'
+                    AND subgroup = 'false'
+                    AND end_time > now() - interval '25 hours'
+            ) as user_count_table ON realm.id = user_count_table.realm_id
+            LEFT OUTER JOIN (
+                SELECT
+                    value,
+                    realm_id
+                from
+                    analytics_realmcount
+                WHERE
+                    property = 'active_users_audit:is_bot:day'
+                    AND subgroup = 'true'
+                    AND end_time > now() - interval '25 hours'
+            ) as bot_count_table ON realm.id = bot_count_table.realm_id
         WHERE
-            realm.plan_type = 3
-            OR
-            EXISTS (
-                SELECT *
-                FROM zerver_useractivity ua
-                JOIN zerver_userprofile up
-                    ON up.id = ua.user_profile_id
-                WHERE
-                    up.realm_id = realm.id
-                AND up.is_active
-                AND (not up.is_bot)
-                AND
-                    query in (
-                        '/json/send_message',
-                        '/api/v1/send_message',
-                        'send_message_backend',
-                        '/json/update_pointer',
-                        '/json/users/me/pointer',
-                        'update_pointer_backend'
-                    )
-                AND
-                    last_visit > now() - interval '2 week'
-        )
-        ORDER BY dau_count DESC, string_id ASC
-        ''')
+            _14day_active_humans IS NOT NULL
+            or realm.plan_type = 3
+        ORDER BY
+            dau_count DESC,
+            string_id ASC
+    ''')
 
     cursor = connection.cursor()
     cursor.execute(query)
@@ -787,9 +751,9 @@ def user_activity_intervals() -> Tuple[mark_safe, Dict[str, float]]:
 
         realm_minutes[string_id] = realm_duration.total_seconds() / 60
 
-    output += f"\nTotal Duration:                      {total_duration}\n"
-    output += f"\nTotal Duration in minutes:           {total_duration.total_seconds() / 60.}\n"
-    output += f"Total Duration amortized to a month: {total_duration.total_seconds() * 30. / 60.}"
+    output += f"\nTotal duration:                      {total_duration}\n"
+    output += f"\nTotal duration in minutes:           {total_duration.total_seconds() / 60.}\n"
+    output += f"Total duration amortized to a month: {total_duration.total_seconds() * 30. / 60.}"
     content = mark_safe('<pre>' + output + '</pre>')
     return content, realm_minutes
 
@@ -1328,7 +1292,7 @@ def raw_user_activity_table(records: List[QuerySet]) -> str:
         ]
 
     rows = list(map(row, records))
-    title = 'Raw Data'
+    title = 'Raw data'
     return make_table(title, cols, rows)
 
 def get_user_activity_summary(records: List[QuerySet]) -> Dict[str, Dict[str, Any]]:
@@ -1473,7 +1437,7 @@ def user_activity_summary_table(user_summary: Dict[str, Dict[str, Any]]) -> str:
         'count',
     ]
 
-    title = 'User Activity'
+    title = 'User activity'
     return make_table(title, cols, rows)
 
 def realm_user_summary_table(all_records: List[QuerySet],

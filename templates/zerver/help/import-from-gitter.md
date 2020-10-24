@@ -21,9 +21,9 @@ First, export your data from Gitter.
    Zulip.
 
     !!! warn ""
-        **Note:** You'll need a gitter API token to export data. You can get this
+        **Note:** You'll need a Gitter API token to export data. You can get this
         token by following the instructions in the "**Getting Started**" section of the
-        [gitter documentation](https://developer.gitter.im/docs/).
+        [Gitter documentation](https://developer.gitter.im/docs/).
 
 {end_tabs}
 
@@ -45,8 +45,7 @@ skipping "Step 3: Create a Zulip organization, and log in" (you'll
 create your Zulip organization via the data import tool instead).
 
 Log in to a shell on your Zulip server as the `zulip` user. To import with
-the most common configuration, run the following commands, replacing
-`<token>` with the value generated above.
+the most common configuration, run the following commands:
 
 ```
 cd /home/zulip/deployments/current
@@ -90,7 +89,7 @@ to mark the appropriate users as administrators.
 ## Caveats
 
 - The [Gitter data export tool](https://github.com/minrk/archive-gitter)
-  doesn't support exporting private gitter channels.
+  doesn't support exporting private Gitter channels.
 
 - Gitter's export tool doesn't export email addresses; just GitHub
   usernames.  The import tool will thus use [GitHub's generated

@@ -58,7 +58,7 @@ TAB_DISPLAY_NAMES = {
 
     'mm-default': 'Default installation',
     'mm-docker': 'Docker',
-    'mm-gitlab-omnibus': 'Gitlab Omnibus',
+    'mm-gitlab-omnibus': 'GitLab Omnibus',
 
     'send-email-invitations': 'Send email invitations',
     'share-an-invite-link': 'Share an invite link',
@@ -79,9 +79,10 @@ TAB_DISPLAY_NAMES = {
 }
 
 class TabbedSectionsGenerator(Extension):
-    def extendMarkdown(self, md: markdown.Markdown, md_globals: Dict[str, Any]) -> None:
-        md.preprocessors.add(
-            'tabbed_sections', TabbedSectionsPreprocessor(md, self.getConfigs()), '_end')
+    def extendMarkdown(self, md: markdown.Markdown) -> None:
+        md.preprocessors.register(
+            TabbedSectionsPreprocessor(md, self.getConfigs()), 'tabbed_sections', -500
+        )
 
 class TabbedSectionsPreprocessor(Preprocessor):
     def __init__(self, md: markdown.Markdown, config: Dict[str, Any]) -> None:

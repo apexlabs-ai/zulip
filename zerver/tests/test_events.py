@@ -255,7 +255,7 @@ class BaseAction(ZulipTestCase):
             'msg': '',
             'result': 'success'
         }
-        validate_against_openapi_schema(content, '/events', 'get', '200')
+        validate_against_openapi_schema(content, '/events', 'get', '200', display_brief_error=True)
         self.assertEqual(len(events), num_events)
         initial_state = copy.deepcopy(hybrid_state)
         post_process_state(self.user_profile, initial_state, notification_settings_null)
@@ -1483,6 +1483,17 @@ class NormalActionsTest(BaseAction):
         events = self.verify_action(action, num_events=2)
         check_subscription_peer_add('events[1]', events[1])
 
+    def test_remove_other_user_never_subscribed(self) -> None:
+        self.subscribe(self.example_user("othello"), "test_stream")
+        stream = get_stream("test_stream", self.user_profile.realm)
+
+        action = lambda: bulk_remove_subscriptions(
+            [self.example_user('othello')],
+            [stream],
+            get_client("website"))
+        events = self.verify_action(action)
+        check_subscription_peer_remove('events[0]', events[0])
+
     def test_do_delete_message_stream(self) -> None:
         hamlet = self.example_user('hamlet')
         msg_id = self.send_stream_message(hamlet, "Verona")
@@ -1730,7 +1741,7 @@ class RealmPropertyActionTest(BaseAction):
             invite_to_stream_policy=[3, 2, 1],
             private_message_policy=[2, 1],
             user_group_edit_policy=[1, 2],
-            wildcard_mention_policy=[3, 2, 1],
+            wildcard_mention_policy=[6, 5, 4, 3, 2, 1],
             email_address_visibility=[Realm.EMAIL_ADDRESS_VISIBILITY_ADMINS],
             bot_creation_policy=[Realm.BOT_CREATION_EVERYONE],
             video_chat_provider=[
@@ -1830,7 +1841,7 @@ class SubscribeActionTest(BaseAction):
         action: Callable[[], object] = lambda: self.subscribe(self.example_user("hamlet"), "test_stream")
         events = self.verify_action(
             action,
-            event_types=["subscription", "realm_user"],
+            event_types=["subscription"],
             include_subscribers=include_subscribers)
         check_subscription_add('events[0]', events[0], include_subscribers)
 
@@ -1844,7 +1855,8 @@ class SubscribeActionTest(BaseAction):
 
         stream = get_stream("test_stream", self.user_profile.realm)
 
-        # Now remove the first user, to test the normal unsubscribe flow
+        # Now remove the first user, to test the normal unsubscribe flow and
+        # 'peer_remove' event for subscribed streams.
         action = lambda: bulk_remove_subscriptions(
             [self.example_user('othello')],
             [stream],
@@ -1855,7 +1867,7 @@ class SubscribeActionTest(BaseAction):
             state_change_expected=include_subscribers)
         check_subscription_peer_remove('events[0]', events[0])
 
-        # Now remove the second user, to test the 'vacate' event flow
+        # Now remove the user himself, to test the 'remove' event flow
         action = lambda: bulk_remove_subscriptions(
             [self.example_user('hamlet')],
             [stream],
@@ -1871,6 +1883,26 @@ class SubscribeActionTest(BaseAction):
             events[0]['subscriptions'][0]['name'],
             'test_stream',
         )
+
+        # Subscribe other user to test 'peer_add' event flow for unsubscribed stream.
+        action = lambda: self.subscribe(self.example_user("iago"), "test_stream")
+        events = self.verify_action(
+            action,
+            event_types=["subscription"],
+            include_subscribers=include_subscribers,
+            state_change_expected=include_subscribers)
+        check_subscription_peer_add('events[0]', events[0])
+
+        # Remove the user to test 'peer_remove' event flow for unsubscribed stream.
+        action = lambda: bulk_remove_subscriptions(
+            [self.example_user('iago')],
+            [stream],
+            get_client("website"))
+        events = self.verify_action(
+            action,
+            include_subscribers=include_subscribers,
+            state_change_expected=include_subscribers)
+        check_subscription_peer_remove('events[0]', events[0])
 
         # Now resubscribe a user, to make sure that works on a vacated stream
         action = lambda: self.subscribe(self.example_user("hamlet"), "test_stream")

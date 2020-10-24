@@ -184,7 +184,7 @@ stream_data.add_sub(amp_stream);
 run_test("fenced_block_defaults", () => {
     const input = "\n```\nfenced code\n```\n\nand then after\n";
     const expected =
-        '\n\n<div class="codehilite"><pre><span></span><code>fenced code\n</code></pre></div>\n\n\n\nand then after\n\n';
+        '\n\n<div class="codehilite"><pre><span></span><code>fenced code\n</code></pre></div>\n\n\nand then after\n\n';
     const output = fenced_code.process_fenced_code(input);
     assert.equal(output, expected);
 });
@@ -223,11 +223,11 @@ run_test("markdown_detection", () => {
         "https://zulip.com/image.jpg too",
         "Contains a zulip.com/foo.jpeg file",
         "Contains a https://zulip.com/image.png file",
-        "twitter url https://twitter.com/jacobian/status/407886996565016579",
+        "Twitter URL https://twitter.com/jacobian/status/407886996565016579",
         "https://twitter.com/jacobian/status/407886996565016579",
         "then https://twitter.com/jacobian/status/407886996565016579",
-        "twitter url http://twitter.com/jacobian/status/407886996565016579",
-        "youtube url https://www.youtube.com/watch?v=HHZ8iqswiCw&feature=youtu.be&a",
+        "Twitter URL http://twitter.com/jacobian/status/407886996565016579",
+        "YouTube URL https://www.youtube.com/watch?v=HHZ8iqswiCw&feature=youtu.be&a",
     ];
 
     no_markup.forEach((content) => {
@@ -294,13 +294,13 @@ run_test("marked", () => {
         {
             input: "\n```\nfenced code\n```\n\nand then after\n",
             expected:
-                '<div class="codehilite"><pre><span></span><code>fenced code\n</code></pre></div>\n\n\n<p>and then after</p>',
+                '<div class="codehilite"><pre><span></span><code>fenced code\n</code></pre></div>\n<p>and then after</p>',
         },
         {
             input:
                 "\n```\n    fenced code trailing whitespace            \n```\n\nand then after\n",
             expected:
-                '<div class="codehilite"><pre><span></span><code>    fenced code trailing whitespace\n</code></pre></div>\n\n\n<p>and then after</p>',
+                '<div class="codehilite"><pre><span></span><code>    fenced code trailing whitespace\n</code></pre></div>\n<p>and then after</p>',
         },
         {
             input: "* a\n* list \n* here",
@@ -309,12 +309,12 @@ run_test("marked", () => {
         {
             input: "\n```c#\nfenced code special\n```\n\nand then after\n",
             expected:
-                '<div class="codehilite" data-code-language="C#"><pre><span></span><code>fenced code special\n</code></pre></div>\n\n\n<p>and then after</p>',
+                '<div class="codehilite" data-code-language="C#"><pre><span></span><code>fenced code special\n</code></pre></div>\n<p>and then after</p>',
         },
         {
             input: "\n```vb.net\nfenced code dot\n```\n\nand then after\n",
             expected:
-                '<div class="codehilite" data-code-language="VB.net"><pre><span></span><code>fenced code dot\n</code></pre></div>\n\n\n<p>and then after</p>',
+                '<div class="codehilite" data-code-language="VB.net"><pre><span></span><code>fenced code dot\n</code></pre></div>\n<p>and then after</p>',
         },
         {
             input: "Some text first\n* a\n* list \n* here\n\nand then after",
@@ -475,7 +475,7 @@ run_test("marked", () => {
                 '<p><span aria-label="smile" class="emoji emoji-1f642" role="img" title="smile">:smile:</span></p>',
             translate_emoticons: true,
         },
-        // Test HTML Escape in Custom Zulip Rules
+        // Test HTML escaping in custom Zulip rules
         {
             input: "@**<h1>The Rogue One</h1>**",
             expected: "<p>@**&lt;h1&gt;The Rogue One&lt;/h1&gt;**</p>",

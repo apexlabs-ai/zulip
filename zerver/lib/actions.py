@@ -103,6 +103,7 @@ from zerver.lib.message import (
     truncate_body,
     truncate_topic,
     update_first_visible_message_id,
+    wildcard_mention_allowed,
 )
 from zerver.lib.pysa import mark_sanitized
 from zerver.lib.queue import queue_json_publish
@@ -119,10 +120,9 @@ from zerver.lib.send_email import (
 from zerver.lib.server_initialization import create_internal_realm, server_initialized
 from zerver.lib.sessions import delete_user_sessions
 from zerver.lib.storage import static_path
-from zerver.lib.stream_recipient import StreamRecipientMap
 from zerver.lib.stream_subscription import (
     SubInfo,
-    bulk_get_peers,
+    bulk_get_private_peers,
     bulk_get_subscriber_peer_info,
     get_active_subscriptions_for_stream_id,
     get_bulk_stream_subscriber_info,
@@ -2336,9 +2336,20 @@ def check_message(sender: UserProfile, client: Client, addressee: Addressee,
             stream = addressee.stream()
         assert stream is not None
 
-        recipient = stream.recipient
-
-        # This will raise JsonableError if there are problems.
+        # To save a database round trip, we construct the Recipient
+        # object for the Stream rather than fetching it from the
+        # database using the stream.recipient foreign key.
+        #
+        # This is simpler than ensuring that code paths that fetch a
+        # Stream that will be used for sending a message have a
+        # `select_related("recipient"), which would also needlessly
+        # expand Stream objects in memory (all the fields of Recipient
+        # are already known given the Stream object).
+        recipient = Recipient(
+            id=stream.recipient_id,
+            type_id=stream.id,
+            type=Recipient.STREAM,
+        )
 
         if sender.bot_type != sender.OUTGOING_WEBHOOK_BOT:
             access_stream_for_send_message(
@@ -2406,7 +2417,12 @@ def check_message(sender: UserProfile, client: Client, addressee: Addressee,
     message_dict = {'message': message, 'stream': stream, 'local_id': local_id,
                     'sender_queue_id': sender_queue_id, 'realm': realm,
                     'widget_content': widget_content}
-    return build_message_send_dict(message_dict, email_gateway)
+    message_send_dict = build_message_send_dict(message_dict, email_gateway)
+
+    if stream is not None and message_send_dict['message'].mentions_wildcard:
+        if not wildcard_mention_allowed(sender, stream):
+            raise JsonableError(_("You do not have permission to use wildcard mentions in this stream."))
+    return message_send_dict
 
 def _internal_prep_message(realm: Realm,
                            sender: UserProfile,
@@ -2626,30 +2642,29 @@ def validate_user_access_to_subscribers_helper(
     if (stream_dict["invite_only"] and not check_user_subscribed(user_profile)):
         raise JsonableError(_("Unable to retrieve subscribers for private stream"))
 
-def bulk_get_subscriber_user_ids(stream_dicts: Iterable[Mapping[str, Any]],
-                                 user_profile: UserProfile,
-                                 sub_dict: Mapping[int, bool],
-                                 stream_recipient: StreamRecipientMap) -> Dict[int, List[int]]:
+def bulk_get_subscriber_user_ids(
+    stream_dicts: Iterable[Mapping[str, Any]],
+    user_profile: UserProfile,
+    subscribed_stream_ids: Set[int],
+) -> Dict[int, List[int]]:
     """sub_dict maps stream_id => whether the user is subscribed to that stream."""
     target_stream_dicts = []
     for stream_dict in stream_dicts:
-        stream_recipient.populate_with(stream_id=stream_dict["id"],
-                                       recipient_id=stream_dict["recipient_id"])
+        stream_id = stream_dict["id"]
+        is_subscribed = stream_id in subscribed_stream_ids
+
         try:
             validate_user_access_to_subscribers_helper(
                 user_profile,
                 stream_dict,
-                lambda user_profile: sub_dict[stream_dict["id"]],
+                lambda user_profile: is_subscribed,
             )
         except JsonableError:
             continue
         target_stream_dicts.append(stream_dict)
 
-    stream_ids = [stream['id'] for stream in target_stream_dicts]
-    recipient_ids = sorted(
-        stream_recipient.recipient_id_for(stream_id)
-        for stream_id in stream_ids
-    )
+    recip_to_stream_id = {stream["recipient_id"]: stream["id"] for stream in target_stream_dicts}
+    recipient_ids = sorted([stream["recipient_id"] for stream in target_stream_dicts])
 
     result: Dict[int, List[int]] = {stream["id"]: [] for stream in stream_dicts}
     if not recipient_ids:
@@ -2683,8 +2698,6 @@ def bulk_get_subscriber_user_ids(stream_dicts: Iterable[Mapping[str, Any]],
     cursor.execute(query, {"recipient_ids": tuple(recipient_ids)})
     rows = cursor.fetchall()
     cursor.close()
-
-    recip_to_stream_id = stream_recipient.recipient_to_stream_id_dict()
 
     '''
     Using groupby/itemgetter here is important for performance, at scale.
@@ -2743,9 +2756,6 @@ def send_subscription_add_events(
             subscription = sub_info.sub
             sub_dict = stream.to_dict()
             for field_name in Subscription.API_FIELDS:
-                if field_name == "active":
-                    # Skip the "active" field, it's implied by context
-                    continue
                 sub_dict[field_name] = getattr(subscription, field_name)
 
             sub_dict['in_home_view'] = not subscription.is_muted
@@ -2834,15 +2844,15 @@ def bulk_add_subscriptions(
         subs_to_activate=subs_to_activate,
     )
 
-    new_stream_user_ids: Dict[int, Set[int]] = defaultdict(set)
+    altered_user_dict: Dict[int, Set[int]] = defaultdict(set)
     for sub_info in subs_to_add + subs_to_activate:
-        new_stream_user_ids[sub_info.stream.id].add(sub_info.user.id)
+        altered_user_dict[sub_info.stream.id].add(sub_info.user.id)
 
     stream_dict = {stream.id: stream for stream in streams}
 
     new_streams = [
         stream_dict[stream_id]
-        for stream_id in new_stream_user_ids
+        for stream_id in altered_user_dict
     ]
 
     subscriber_peer_info = bulk_get_subscriber_peer_info(
@@ -2856,7 +2866,7 @@ def bulk_add_subscriptions(
     send_stream_creation_events_for_private_streams(
         realm=realm,
         stream_dict=stream_dict,
-        new_stream_user_ids=new_stream_user_ids,
+        altered_user_dict=altered_user_dict,
     )
 
     send_subscription_add_events(
@@ -2865,11 +2875,12 @@ def bulk_add_subscriptions(
         subscriber_dict=subscriber_peer_info.subscribed_ids,
     )
 
-    send_peer_add_events(
+    send_peer_subscriber_events(
+        op="peer_add",
         realm=realm,
-        new_stream_user_ids=new_stream_user_ids,
+        altered_user_dict=altered_user_dict,
         stream_dict=stream_dict,
-        peer_id_dict=subscriber_peer_info.peer_ids,
+        private_peer_dict=subscriber_peer_info.private_peer_dict,
     )
 
     return (
@@ -2920,9 +2931,9 @@ def bulk_add_subs_to_db_with_logging(
 def send_stream_creation_events_for_private_streams(
     realm: Realm,
     stream_dict: Dict[int, Stream],
-    new_stream_user_ids: Dict[int, Set[int]],
+    altered_user_dict: Dict[int, Set[int]],
 ) -> None:
-    for stream_id, stream_users_ids in new_stream_user_ids.items():
+    for stream_id, stream_users_ids in altered_user_dict.items():
         stream = stream_dict[stream_id]
 
         if not stream.is_public():
@@ -2938,28 +2949,64 @@ def send_stream_creation_events_for_private_streams(
             if notify_user_ids:
                 send_stream_creation_event(stream, notify_user_ids)
 
-def send_peer_add_events(
+def send_peer_subscriber_events(
+    op: str,
     realm: Realm,
     stream_dict: Dict[int, Stream],
-    new_stream_user_ids: Dict[int, Set[int]],
-    peer_id_dict: Dict[int, Set[int]],
+    altered_user_dict: Dict[int, Set[int]],
+    private_peer_dict: Dict[int, Set[int]],
 ) -> None:
-    # Send peer_add events to other users who are tracking the
+    # Send peer_add/peer_remove events to other users who are tracking the
     # subscribers lists of streams in their browser; everyone for
     # public streams and only existing subscribers for private streams.
-    for stream_id, altered_user_ids in new_stream_user_ids.items():
-        stream = stream_dict[stream_id]
 
-        if stream.is_in_zephyr_realm and not stream.invite_only:
-            continue
+    assert op in ["peer_add", "peer_remove"]
 
-        peer_user_ids = peer_id_dict[stream_id] - altered_user_ids
+    private_stream_ids = [
+        stream_id for stream_id in altered_user_dict
+        if stream_dict[stream_id].invite_only
+    ]
+
+    for stream_id in private_stream_ids:
+        altered_user_ids = altered_user_dict[stream_id]
+        peer_user_ids = private_peer_dict[stream_id] - altered_user_ids
 
         if peer_user_ids:
-            for new_user_id in altered_user_ids:
-                event = dict(type="subscription", op="peer_add",
-                             stream_id=stream.id,
-                             user_id=new_user_id)
+            event = dict(
+                type="subscription",
+                op=op,
+                stream_ids=[stream_id],
+                user_ids=sorted(list(altered_user_ids))
+            )
+            send_event(realm, event, peer_user_ids)
+
+    public_stream_ids = [
+        stream_id for stream_id in altered_user_dict
+        if not stream_dict[stream_id].invite_only
+        and not stream_dict[stream_id].is_in_zephyr_realm
+    ]
+
+    if public_stream_ids:
+        public_peer_ids = set(active_non_guest_user_ids(realm.id))
+
+        # TODO:
+        #
+        # We eventually want a special optimization for a single user that
+        # subscribes to many streams.  Right now we optimize for the other
+        # scenario, which is also kind of common--if we add/remove multiple
+        # users all for the same stream, we just send one event per stream.
+
+        for stream_id in public_stream_ids:
+            altered_user_ids = altered_user_dict[stream_id]
+            peer_user_ids = public_peer_ids - altered_user_ids
+
+            if peer_user_ids:
+                event = dict(
+                    type="subscription",
+                    op=op,
+                    stream_ids=[stream_id],
+                    user_ids=sorted(list(altered_user_ids)),
+                )
                 send_event(realm, event, peer_user_ids)
 
 def send_peer_remove_events(
@@ -2967,26 +3014,21 @@ def send_peer_remove_events(
     streams: List[Stream],
     altered_user_dict: Dict[int, Set[int]],
 ) -> None:
-    peer_dict = bulk_get_peers(
+    private_streams = [stream for stream in streams if stream.invite_only]
+
+    private_peer_dict = bulk_get_private_peers(
         realm=realm,
-        streams=streams,
+        private_streams=private_streams,
     )
-    for stream in streams:
-        if stream.is_in_zephyr_realm and not stream.invite_only:
-            continue
+    stream_dict = {stream.id: stream for stream in streams}
 
-        altered_user_ids = altered_user_dict[stream.id]
-        peer_user_ids = list(peer_dict[stream.id] - altered_user_ids)
-
-        if peer_user_ids:
-            for removed_user_id in altered_user_ids:
-                event = dict(
-                    type="subscription",
-                    op="peer_remove",
-                    stream_id=stream.id,
-                    user_id=removed_user_id,
-                )
-                send_event(realm, event, peer_user_ids)
+    send_peer_subscriber_events(
+        op="peer_remove",
+        realm=realm,
+        stream_dict=stream_dict,
+        altered_user_dict=altered_user_dict,
+        private_peer_dict=private_peer_dict,
+    )
 
 def get_available_notification_sounds() -> List[str]:
     notification_sounds_path = static_path('audio/notification_sounds')
@@ -4898,168 +4940,186 @@ def get_web_public_subs(realm: Realm) -> SubHelperT:
 
     return (subscribed, [], [])
 
+def build_stream_dict_for_sub(
+    user: UserProfile,
+    sub: Subscription,
+    stream: Stream,
+    subscribers: Optional[List[int]],
+    recent_traffic: Dict[int, int],
+) -> Dict[str, object]:
+    # We first construct a dictionary based on the standard Stream
+    # and Subscription models' API_FIELDS.
+    result = {}
+    for field_name in Stream.API_FIELDS:
+        if field_name == "id":
+            result["stream_id"] = stream["id"]
+            continue
+        elif field_name == "date_created":
+            result["date_created"] = datetime_to_timestamp(stream[field_name])
+            continue
+        result[field_name] = stream[field_name]
+
+    # Copy Subscription.API_FIELDS.
+    for field_name in Subscription.API_FIELDS:
+        result[field_name] = sub[field_name]
+
+    # Backwards-compatibility for clients that haven't been
+    # updated for the in_home_view => is_muted API migration.
+    result["in_home_view"] = not result["is_muted"]
+
+    # Backwards-compatibility for clients that haven't been
+    # updated for the is_announcement_only -> stream_post_policy
+    # migration.
+    result["is_announcement_only"] = \
+        stream["stream_post_policy"] == Stream.STREAM_POST_POLICY_ADMINS
+
+    # Add a few computed fields not directly from the data models.
+    result["stream_weekly_traffic"] = get_average_weekly_stream_traffic(
+        stream["id"], stream["date_created"], recent_traffic)
+
+    result["email_address"] = encode_email_address_helper(
+        stream["name"], stream["email_token"], show_sender=True)
+
+    # Important: don't show the subscribers if the stream is invite only
+    # and this user isn't on it anymore (or a realm administrator).
+    if stream["invite_only"] and not (sub["active"] or user.is_realm_admin):
+        subscribers = None
+
+    # Guest users lose access to subscribers when they are unsubscribed if the stream
+    # is not web-public.
+    if not sub["active"] and user.is_guest and not stream["is_web_public"]:
+        subscribers = None
+    if subscribers is not None:
+        result["subscribers"] = subscribers
+
+    return result
+
+def build_stream_dict_for_never_sub(
+    stream: Stream,
+    subscribers: Optional[List[int]],
+    recent_traffic: Dict[int, int],
+) -> Dict[str, object]:
+    result = {}
+    for field_name in Stream.API_FIELDS:
+        if field_name == "id":
+            result["stream_id"] = stream["id"]
+            continue
+        elif field_name == "date_created":
+            result["date_created"] = datetime_to_timestamp(stream[field_name])
+            continue
+        result[field_name] = stream[field_name]
+
+    result["stream_weekly_traffic"] = get_average_weekly_stream_traffic(
+        stream["id"], stream["date_created"], recent_traffic)
+
+    # Backwards-compatibility addition of removed field.
+    result["is_announcement_only"] = stream["stream_post_policy"] == Stream.STREAM_POST_POLICY_ADMINS
+
+    if subscribers is not None:
+        result["subscribers"] = subscribers
+
+    return result
+
 # In general, it's better to avoid using .values() because it makes
 # the code pretty ugly, but in this case, it has significant
 # performance impact for loading / for users with large numbers of
 # subscriptions, so it's worth optimizing.
 def gather_subscriptions_helper(user_profile: UserProfile,
                                 include_subscribers: bool=True) -> SubHelperT:
+    realm = user_profile.realm
+    all_streams = get_active_streams(realm).values(
+        *Stream.API_FIELDS,
+        # The realm_id and recipient_id are generally not needed in the API.
+        "realm_id",
+        "recipient_id",
+        # email_token isn't public to some users with access to
+        # the stream, so doesn't belong in API_FIELDS.
+        "email_token",
+    )
+    recip_id_to_stream_id = {stream["recipient_id"]: stream["id"] for stream in all_streams}
+    all_streams_map = {stream["id"]: stream for stream in all_streams}
+
     sub_dicts = get_stream_subscriptions_for_user(user_profile).values(
-        *Subscription.API_FIELDS, "recipient_id").order_by("recipient_id")
+        *Subscription.API_FIELDS,
+        "recipient_id",
+        "active",
+    ).order_by("recipient_id")
 
-    sub_dicts = list(sub_dicts)
-    sub_recipient_ids = [
-        sub['recipient_id']
-        for sub in sub_dicts
+    # We only care about subscriptions for active streams.
+    sub_dicts = [
+        sub for sub in sub_dicts
+        if recip_id_to_stream_id.get(sub["recipient_id"])
     ]
-    stream_recipient = StreamRecipientMap()
-    stream_recipient.populate_for_recipient_ids(sub_recipient_ids)
 
-    stream_ids: Set[int] = set()
-    for sub in sub_dicts:
-        sub['stream_id'] = stream_recipient.stream_id_for(sub['recipient_id'])
-        stream_ids.add(sub['stream_id'])
+    def get_stream_id(sub: Subscription) -> int:
+        return recip_id_to_stream_id[sub["recipient_id"]]
 
-    recent_traffic = get_streams_traffic(stream_ids=stream_ids)
+    traffic_stream_ids = {get_stream_id(sub) for sub in sub_dicts}
+    recent_traffic = get_streams_traffic(stream_ids=traffic_stream_ids)
 
-    all_streams = get_active_streams(user_profile.realm).select_related(
-        "realm").values(
-            *Stream.API_FIELDS,
-            # The realm_id and recipient_id are generally not needed in the API.
-            "realm_id",
-            "is_web_public",
-            "recipient_id",
-            # email_token isn't public to some users with access to
-            # the stream, so doesn't belong in API_FIELDS.
-            "email_token")
-
-    stream_dicts = [stream for stream in all_streams if stream['id'] in stream_ids]
-    stream_hash = {}
-    web_public_stream_ids = [stream['id'] for stream in all_streams if stream['is_web_public']]
-    for stream in stream_dicts:
-        stream_hash[stream["id"]] = stream
-
-    for sub in sub_dicts:
-        stream = stream_hash.get(sub["stream_id"])
-        if stream:
-            sub["is_web_public"] = stream.get("is_web_public", False)
-
-    all_streams_id = [stream["id"] for stream in all_streams]
-
-    subscribed = []
-    unsubscribed = []
-    never_subscribed = []
-
-    # Deactivated streams aren't in stream_hash.
-    streams = [stream_hash[sub["stream_id"]] for sub in sub_dicts
-               if sub["stream_id"] in stream_hash]
-    streams_subscribed_map = {sub["stream_id"]: sub["active"] for sub in sub_dicts}
-
-    # Add never subscribed streams to streams_subscribed_map
-    streams_subscribed_map.update({stream['id']: False for stream in all_streams if stream not in streams})
+    # The highly optimized bulk_get_subscriber_user_ids wants to know which
+    # streams we are subscribed to, for validation purposes, and it uses that
+    # info to know if it's allowed to find OTHER subscribers.
+    subscribed_stream_ids = {get_stream_id(sub) for sub in sub_dicts if sub["active"]}
 
     if include_subscribers:
         subscriber_map: Mapping[int, Optional[List[int]]] = bulk_get_subscriber_user_ids(
             all_streams,
             user_profile,
-            streams_subscribed_map,
-            stream_recipient,
+            subscribed_stream_ids,
         )
     else:
         # If we're not including subscribers, always return None,
         # which the below code needs to check for anyway.
         subscriber_map = defaultdict(lambda: None)
 
+    # Okay, now we finally get to populating our main results, which
+    # will be these three lists.
+    subscribed = []
+    unsubscribed = []
+    never_subscribed = []
+
     sub_unsub_stream_ids = set()
     for sub in sub_dicts:
-        sub_unsub_stream_ids.add(sub["stream_id"])
-        stream = stream_hash.get(sub["stream_id"])
-        if not stream:
-            # This stream has been deactivated, don't include it.
-            continue
+        stream_id = get_stream_id(sub)
+        sub_unsub_stream_ids.add(stream_id)
+        stream = all_streams_map[stream_id]
 
-        # We first construct a dictionary based on the standard Stream
-        # and Subscription models' API_FIELDS.
-        stream_dict = {}
-        for field_name in Stream.API_FIELDS:
-            if field_name == "id":
-                stream_dict['stream_id'] = stream["id"]
-                continue
-            elif field_name == "date_created":
-                stream_dict['date_created'] = datetime_to_timestamp(stream[field_name])
-                continue
-            stream_dict[field_name] = stream[field_name]
-
-        # Copy Subscription.API_FIELDS except for "active", which is
-        # used to determine where to the put the field.
-        for field_name in Subscription.API_FIELDS:
-            stream_dict[field_name] = sub[field_name]
-
-        # Backwards-compatibility for clients that haven't been
-        # updated for the in_home_view => is_muted API migration.
-        stream_dict['in_home_view'] = not stream_dict['is_muted']
-        # Backwards-compatibility for clients that haven't been
-        # updated for the is_announcement_only -> stream_post_policy
-        # migration.
-        stream_dict['is_announcement_only'] = \
-            stream['stream_post_policy'] == Stream.STREAM_POST_POLICY_ADMINS
-
-        # Add a few computed fields not directly from the data models.
-        stream_dict['stream_weekly_traffic'] = get_average_weekly_stream_traffic(
-            stream["id"], stream["date_created"], recent_traffic)
-        stream_dict['email_address'] = encode_email_address_helper(
-            stream["name"], stream["email_token"], show_sender=True)
-
-        # Construct and add subscribers data
-        subscribers: Optional[List[int]] = subscriber_map[stream["id"]]
-        # Important: don't show the subscribers if the stream is invite only
-        # and this user isn't on it anymore (or a realm administrator).
-        if stream["invite_only"] and not (sub["active"] or user_profile.is_realm_admin):
-            subscribers = None
-        # Guest users lose access to subscribers when they are unsubscribed if the stream
-        # is not web-public.
-        if not sub["active"] and user_profile.is_guest and not sub["is_web_public"]:
-            subscribers = None
-        if subscribers is not None:
-            stream_dict['subscribers'] = subscribers
+        stream_dict = build_stream_dict_for_sub(
+            user=user_profile,
+            sub=sub,
+            stream=stream,
+            subscribers=subscriber_map[stream_id],
+            recent_traffic=recent_traffic,
+        )
 
         # is_active is represented in this structure by which list we include it in.
-        is_active = stream_dict.pop("active")
+        is_active = sub["active"]
         if is_active:
             subscribed.append(stream_dict)
         else:
             unsubscribed.append(stream_dict)
 
-    all_streams_id_set = set(all_streams_id)
     if user_profile.can_access_public_streams():
-        never_subscribed_stream_ids = all_streams_id_set - sub_unsub_stream_ids
+        never_subscribed_stream_ids = set(all_streams_map) - sub_unsub_stream_ids
     else:
-        never_subscribed_stream_ids = set(web_public_stream_ids) - sub_unsub_stream_ids
-    never_subscribed_streams = [ns_stream_dict for ns_stream_dict in all_streams
-                                if ns_stream_dict['id'] in never_subscribed_stream_ids]
+        web_public_stream_ids = {stream['id'] for stream in all_streams if stream['is_web_public']}
+        never_subscribed_stream_ids = web_public_stream_ids - sub_unsub_stream_ids
+
+    never_subscribed_streams = [
+        all_streams_map[stream_id]
+        for stream_id in never_subscribed_stream_ids
+    ]
 
     for stream in never_subscribed_streams:
-        is_public = (not stream['invite_only'])
+        is_public = not stream['invite_only']
         if is_public or user_profile.is_realm_admin:
-            stream_dict = {}
-            for field_name in Stream.API_FIELDS:
-                if field_name == "id":
-                    stream_dict['stream_id'] = stream["id"]
-                    continue
-                elif field_name == "date_created":
-                    stream_dict['date_created'] = datetime_to_timestamp(stream[field_name])
-                    continue
-                stream_dict[field_name] = stream[field_name]
+            stream_dict = build_stream_dict_for_never_sub(
+                stream=stream,
+                subscribers=subscriber_map[stream["id"]],
+                recent_traffic=recent_traffic
+            )
 
-            stream_dict['stream_weekly_traffic'] = get_average_weekly_stream_traffic(
-                stream["id"], stream["date_created"], recent_traffic)
-            # Backwards-compatibility addition of removed field.
-            stream_dict['is_announcement_only'] = \
-                stream['stream_post_policy'] == Stream.STREAM_POST_POLICY_ADMINS
-
-            subscribers = subscriber_map[stream["id"]]
-            if subscribers is not None:
-                stream_dict['subscribers'] = subscribers
             never_subscribed.append(stream_dict)
 
     return (sorted(subscribed, key=lambda x: x['name']),

@@ -121,7 +121,9 @@ def fetch_initial_state_data(
     if want('custom_profile_fields'):
         fields = custom_profile_fields_for_realm(realm.id)
         state['custom_profile_fields'] = [f.as_dict() for f in fields]
-        state['custom_profile_field_types'] = CustomProfileField.FIELD_TYPE_CHOICES_DICT
+        state['custom_profile_field_types'] = {
+            item[4]: {"id": item[0], "name": str(item[1])} for item in CustomProfileField.ALL_FIELD_TYPES
+        }
 
     if want('hotspots'):
         # Even if we offered special hotspots for guests without an
@@ -715,23 +717,21 @@ def apply_event(state: Dict[str, Any],
                 if sub['name'].lower() == event['name'].lower():
                     sub[event['property']] = event['value']
         elif event['op'] == 'peer_add':
-            stream_id = event['stream_id']
-            user_id = event['user_id']
-            for sub in state['subscriptions']:
-                if (sub['stream_id'] == stream_id and
-                        user_id not in sub['subscribers']):
-                    sub['subscribers'].append(user_id)
-            for sub in state['never_subscribed']:
-                if (sub['stream_id'] == stream_id and
-                        user_id not in sub['subscribers']):
-                    sub['subscribers'].append(user_id)
+            stream_ids = set(event["stream_ids"])
+            user_ids = set(event["user_ids"])
+            for sub_dict in [state["subscriptions"], state['unsubscribed'], state["never_subscribed"]]:
+                for sub in sub_dict:
+                    if sub["stream_id"] in stream_ids:
+                        subscribers = set(sub["subscribers"]) | user_ids
+                        sub["subscribers"] = sorted(list(subscribers))
         elif event['op'] == 'peer_remove':
-            stream_id = event['stream_id']
-            user_id = event['user_id']
-            for sub in state['subscriptions']:
-                if (sub['stream_id'] == stream_id and
-                        user_id in sub['subscribers']):
-                    sub['subscribers'].remove(user_id)
+            stream_ids = set(event["stream_ids"])
+            user_ids = set(event["user_ids"])
+            for sub_dict in [state["subscriptions"], state['unsubscribed'], state['never_subscribed']]:
+                for sub in sub_dict:
+                    if sub["stream_id"] in stream_ids:
+                        subscribers = set(sub["subscribers"]) - user_ids
+                        sub["subscribers"] = sorted(list(subscribers))
     elif event['type'] == "presence":
         if slim_presence:
             user_key = str(event['user_id'])

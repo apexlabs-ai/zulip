@@ -2,6 +2,17 @@ class zulip::base {
   include zulip::common
   case $::osfamily {
     'debian': {
+      include zulip::apt_repository
+    }
+    'redhat': {
+      include zulip::yum_repository
+    }
+    default: {
+      fail('osfamily not supported')
+    }
+  }
+  case $::osfamily {
+    'debian': {
       $release_name = $::operatingsystemrelease ? {
         # Debian releases
         /^7\.[0-9]*$/  => 'wheezy',
@@ -23,7 +34,7 @@ class zulip::base {
         # Used in scripts including install-yarn.sh
         'curl',
         'wget',
-        # Used to read /etc/zulip/zulip.conf for `zulipconf` puppet function
+        # Used to read /etc/zulip/zulip.conf for `zulipconf` Puppet function
         'crudini',
         # Used for tools like sponge
         'moreutils',
@@ -31,7 +42,7 @@ class zulip::base {
         $zulip::common::nagios_plugins,
         # Required for using HTTPS in apt repositories.
         'apt-transport-https',
-        # Needed for the cron jobs installed by puppet
+        # Needed for the cron jobs installed by Puppet
         'cron',
       ]
     }
@@ -53,26 +64,6 @@ class zulip::base {
     }
   }
   package { $base_packages: ensure => 'installed' }
-
-  $postgres_version = zulipconf('postgresql', 'version', undef)
-
-  $normal_queues = [
-    'deferred_work',
-    'digest_emails',
-    'email_mirror',
-    'embed_links',
-    'embedded_bots',
-    'error_reports',
-    'invites',
-    'email_senders',
-    'missedmessage_emails',
-    'missedmessage_mobile_notifications',
-    'outgoing_webhooks',
-    'signups',
-    'user_activity',
-    'user_activity_interval',
-    'user_presence',
-  ]
 
   $total_memory_mb = Integer($::memorysize_mb);
 
@@ -127,20 +118,6 @@ class zulip::base {
   }
 
   file { '/var/log/zulip':
-    ensure => 'directory',
-    owner  => 'zulip',
-    group  => 'zulip',
-    mode   => '0640',
-  }
-
-  file { '/var/log/zulip/queue_error':
-    ensure => 'directory',
-    owner  => 'zulip',
-    group  => 'zulip',
-    mode   => '0640',
-  }
-
-  file { '/var/log/zulip/queue_stats':
     ensure => 'directory',
     owner  => 'zulip',
     group  => 'zulip',
