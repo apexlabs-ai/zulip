@@ -35,7 +35,6 @@ for path in schema['paths'].keys():
                         suffix = 'error'
                     else:
                         suffix = status
-                    # below should actually be
                     refName = stringcase.camelcase("{}_{}_{}".format(
                         path.replace('/', '', 1).replace('/', '_').replace('{', '').replace('}', ''), method, suffix))
                     print(refName)
